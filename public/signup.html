@@ -337,13 +337,27 @@ html,body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color
           </div>
         </div>
 
-        <div style="background:var(--green2);border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">
+        <div style="background:var(--green2);border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start">
           <span style="font-size:18px">🎁</span>
           <div>
             <div style="font-size:12.5px;font-weight:800;color:var(--green);margin-bottom:2px">14 days free, then choose to subscribe</div>
             <div style="font-size:11.5px;color:var(--t2);line-height:1.5">You won't be charged today. We'll email you 3 days before your trial ends so you can decide.</div>
           </div>
         </div>
+
+        <!-- Promo Code -->
+        <details style="margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:0">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--blue);font-weight:700;padding:11px 14px;list-style:none;display:flex;align-items:center;gap:6px;user-select:none">
+            <span style="font-size:14px">🎟️</span> Have a promo code? Click to enter
+          </summary>
+          <div style="padding:0 14px 14px;border-top:1px solid var(--border)">
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <input class="fi" id="promoCodeInput" placeholder="Enter promo code" style="text-transform:uppercase;font-family:Consolas;letter-spacing:.05em;flex:1" autocomplete="off">
+              <button type="button" class="btn-p" onclick="applyPromoCode()" style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Apply</button>
+            </div>
+            <div id="promoStatus" style="margin-top:10px;font-size:12px;display:none"></div>
+          </div>
+        </details>
 
         <button class="btn btn-p" id="finishBtn" onclick="finishSignup()">
           <span class="spinner"></span>
@@ -492,6 +506,70 @@ function saveTenants(t){
   try { localStorage.setItem(TENANTS_KEY, JSON.stringify(t)); } catch(e){}
 }
 
+
+// ─── PROMO CODES ───────────────────────────────────────────────
+// These give companies free access. Edit this list to add/remove codes.
+const PROMO_CODES = {
+  'YENULAUNCH2026': { label:'Launch Special',       durationDays:730,   plan:'enterprise', description:'🎉 2 YEARS FREE on Enterprise plan' },
+  'YENUBETA':       { label:'Beta Tester',          durationDays:365,   plan:'business',   description:'1 year FREE on Business plan' },
+  'YENUFRIEND':     { label:'Friends & Family',     durationDays:180,   plan:'business',   description:'6 months FREE on Business plan' },
+  'YENUDEMO':       { label:'Demo Mode',            durationDays:99999, plan:'enterprise', description:'Unlimited test access (admin demo)' },
+  'YENU2026':       { label:'2026 Free Trial',      durationDays:365,   plan:'business',   description:'1 year FREE — no card needed' }
+};
+
+let appliedPromo = null;
+
+function applyPromoCode() {
+  const input = document.getElementById('promoCodeInput');
+  const status = document.getElementById('promoStatus');
+  const code = input.value.trim().toUpperCase();
+  status.style.display = 'block';
+
+  if (!code) {
+    status.innerHTML = '<div style="background:var(--amber2);color:var(--amber);padding:8px 12px;border-radius:6px;border:1px solid #fde68a">Please enter a code</div>';
+    return;
+  }
+  const promo = PROMO_CODES[code];
+  if (promo) {
+    appliedPromo = Object.assign({ code }, promo);
+    signupData.plan = promo.plan;
+    // Visually update plan picker
+    document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
+    const card = document.querySelector('.plan-card[data-plan="' + promo.plan + '"]');
+    if (card) card.classList.add('selected');
+    status.innerHTML = `
+      <div style="background:#dcfce7;color:#166534;padding:10px 12px;border-radius:6px;border:1px solid #bbf7d0">
+        ✓ <b>${promo.label}</b><br>
+        <span style="font-size:11px">${promo.description}</span>
+      </div>`;
+    // Disable input to lock in
+    input.disabled = true;
+    input.style.background = '#f0fdf4';
+    input.style.color = '#166534';
+    // Update button to allow removing
+    const btn = input.nextElementSibling;
+    btn.textContent = 'Remove';
+    btn.onclick = removePromoCode;
+    btn.style.background = 'var(--red)';
+  } else {
+    status.innerHTML = '<div style="background:var(--red2);color:var(--red);padding:8px 12px;border-radius:6px;border:1px solid #fecaca">⚠ Invalid promo code. Contact support@yenuerp.mv if you believe this is wrong.</div>';
+  }
+}
+
+function removePromoCode() {
+  appliedPromo = null;
+  const input = document.getElementById('promoCodeInput');
+  input.value = '';
+  input.disabled = false;
+  input.style.background = '';
+  input.style.color = '';
+  document.getElementById('promoStatus').style.display = 'none';
+  const btn = input.nextElementSibling;
+  btn.textContent = 'Apply';
+  btn.onclick = applyPromoCode;
+  btn.style.background = 'var(--blue)';
+}
+
 async function finishSignup(){
   const btn = document.getElementById('finishBtn');
   btn.classList.add('loading'); btn.disabled = true;
@@ -500,6 +578,11 @@ async function finishSignup(){
   const trialDays = 14;
   const now = new Date();
   const trialEnd = new Date(now.getTime() + trialDays*24*60*60*1000);
+
+  // Apply promo if entered
+  const effectiveDays = appliedPromo ? appliedPromo.durationDays : trialDays;
+  const effectivePlan = appliedPromo ? appliedPromo.plan : signupData.plan;
+  const effectiveEnd  = new Date(now.getTime() + effectiveDays * 24 * 60 * 60 * 1000);
 
   const tenant = {
     slug:       signupData.slug,
@@ -510,10 +593,12 @@ async function finishSignup(){
     size:       signupData.size,
     country:    signupData.country,
     currency:   signupData.currency,
-    plan:       signupData.plan,
+    plan:       effectivePlan,
     trialStart: now.toISOString(),
-    trialEnd:   trialEnd.toISOString(),
-    status:     'trial',
+    trialEnd:   effectiveEnd.toISOString(),
+    status:     appliedPromo ? 'active' : 'trial',
+    promoCode:  appliedPromo ? appliedPromo.code : null,
+    promoLabel: appliedPromo ? appliedPromo.label : null,
     createdAt:  now.toISOString(),
     // Auth (in real backend this'd be bcrypt hash on the server)
     pwd:        signupData.pwd,
@@ -522,7 +607,7 @@ async function finishSignup(){
       { email: signupData.email, name: signupData.firstName + ' ' + signupData.lastName,
         short: (signupData.firstName[0] + signupData.lastName[0]).toUpperCase(),
         role: 'owner', label: 'Owner / Admin', color: '#0d2d6e',
-        access: ['accounts','pos','payflow','hr'] }
+        access: ['accounts','pos','payflow','hr','setup'] }
     ]
   };
 
@@ -554,11 +639,14 @@ async function finishSignup(){
     role: 'owner',
     label: 'Owner / Admin',
     color: '#0d2d6e',
-    access: ['accounts','pos','payflow','hr'],
+    access: ['accounts','pos','payflow','hr','setup'],
     tenant: tenant.slug,
     coName: tenant.coName,
     plan: tenant.plan,
     trialEnd: tenant.trialEnd,
+    plan_status: tenant.status,
+    promoCode: tenant.promoCode,
+    promoLabel: tenant.promoLabel,
     demo: true
   }));
 
@@ -570,8 +658,13 @@ async function finishSignup(){
   document.getElementById('successCo').textContent = tenant.coName;
   document.getElementById('successEmail').textContent = tenant.email;
   document.getElementById('successUrl').textContent = location.host + ' (workspace: ' + tenant.slug + ')';
-  document.getElementById('trialDays').textContent = trialDays + ' days remaining';
-  document.getElementById('trialEnd').textContent = 'Trial ends ' + trialEnd.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) + ' · No charge during trial';
+  if (appliedPromo) {
+    document.getElementById('trialDays').textContent = '🎁 ' + appliedPromo.label;
+    document.getElementById('trialEnd').textContent = appliedPromo.description + ' · Access until ' + effectiveEnd.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+  } else {
+    document.getElementById('trialDays').textContent = trialDays + ' days remaining';
+    document.getElementById('trialEnd').textContent = 'Trial ends ' + effectiveEnd.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) + ' · No charge during trial';
+  }
 
   btn.classList.remove('loading'); btn.disabled = false;
 }

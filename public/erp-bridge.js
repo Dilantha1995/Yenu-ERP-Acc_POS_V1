@@ -22,9 +22,10 @@
 
   let trialDaysLeft = null;
   let trialExpired = false;
+  let isPromo = !!session.promoCode;
   if (session.trialEnd) {
     trialDaysLeft = Math.ceil((new Date(session.trialEnd) - new Date()) / 86400000);
-    trialExpired = trialDaysLeft < 0 && session.plan_status !== 'active';
+    trialExpired = trialDaysLeft < 0 && session.plan_status !== 'active' && !isPromo;
   }
 
   const access = session.access || ['accounts','pos'];
@@ -100,7 +101,8 @@
         '<span style="color:#9ba3b5">▾</span>' +
       '</button>' +
       '<button class="es-mod" onclick="location.href=\'/app\'">⊞ Modules</button>' +
-      (trialDaysLeft != null && !isExpired ? '<span class="es-trial">⏳ ' + trialDaysLeft + 'd trial</span>' : '') +
+      (isPromo ? '<span class="es-trial" style="background:#dcfce7;color:#14532d;border-color:#86efac">🎁 ' + (session.promoLabel || 'PROMO') + '</span>' : '') +
+      (!isPromo && trialDaysLeft != null && !isExpired ? '<span class="es-trial">⏳ ' + trialDaysLeft + 'd trial</span>' : '') +
       (isExpired ? '<span class="es-trial">⚠ TRIAL ENDED</span>' : '') +
       '<div class="es-menu" id="erpMenu"></div>';
     document.body.appendChild(wrap);

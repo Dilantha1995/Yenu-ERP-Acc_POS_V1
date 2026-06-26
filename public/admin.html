@@ -216,6 +216,7 @@ tr:last-child td{border-bottom:none}
           <button class="fp" onclick="setFilter('active',this)">Active <span class="ct" id="ctActive">0</span></button>
           <button class="fp" onclick="setFilter('expired',this)">Expired <span class="ct" id="ctExpired">0</span></button>
           <button class="fp" onclick="setFilter('expiring',this)">⚠ Expiring soon <span class="ct" id="ctExpiring">0</span></button>
+          <button class="fp" onclick="setFilter('promo',this)">🎁 Promo users <span class="ct" id="ctPromo">0</span></button>
         </div>
         <div class="tw">
           <table id="tenantTable">
@@ -306,6 +307,10 @@ function fmtDate(iso){
 function fmtRf(n){ return 'Rf ' + (n||0).toLocaleString(); }
 
 function tenantStatus(t){
+  if (t.promoCode) {
+    const daysLeft = daysBetween(new Date(), t.trialEnd);
+    return daysLeft < 0 ? 'expired' : 'promo';
+  }
   if (t.status === 'active') return 'active';
   if (t.status === 'paused') return 'paused';
   const daysLeft = daysBetween(new Date(), t.trialEnd);
@@ -342,6 +347,7 @@ function refreshAll(){
   document.getElementById('ctActive').textContent   = active;
   document.getElementById('ctExpired').textContent  = expired;
   document.getElementById('ctExpiring').textContent = expiring;
+  document.getElementById('ctPromo').textContent = list.filter(t => t.promoCode).length;
 
   renderTable();
   renderPlanChart();
@@ -355,6 +361,7 @@ function renderTable(){
     if (CURRENT_FILTER === 'active' && t.status !== 'active') return false;
     if (CURRENT_FILTER === 'expired' && status !== 'expired') return false;
     if (CURRENT_FILTER === 'expiring' && status !== 'expiring') return false;
+    if (CURRENT_FILTER === 'promo' && !t.promoCode) return false;
     if (SEARCH_Q) {
       const q = SEARCH_Q.toLowerCase();
       if (!t.coName.toLowerCase().includes(q) && !t.email.toLowerCase().includes(q) && !t.slug.toLowerCase().includes(q)) return false;
@@ -382,7 +389,8 @@ function renderTable(){
       'expiring': `<span class="bdg b-trial"><span class="bd-dot"></span>Expiring</span>`,
       'expired':  `<span class="bdg b-expired"><span class="bd-dot"></span>Expired</span>`,
       'active':   `<span class="bdg b-active"><span class="bd-dot"></span>Active</span>`,
-      'paused':   `<span class="bdg b-paused"><span class="bd-dot"></span>Paused</span>`
+      'paused':   `<span class="bdg b-paused"><span class="bd-dot"></span>Paused</span>`,
+      'promo':    `<span class="bdg" style="background:#dcfce7;color:#14532d;border:1px solid #86efac">🎁 PROMO</span>`
     }[status];
     const daysClass = daysLeft < 0 ? 'danger' : daysLeft <= 3 ? 'warn' : '';
     const daysText = t.status === 'active' ? '—' : daysLeft < 0 ? `${Math.abs(daysLeft)}d ago` : `${daysLeft}d left`;
@@ -492,6 +500,7 @@ function openTenant(slug){
     <div class="m-row"><div class="lb">Country</div><div class="vl">${esc(t.country || '—')}</div></div>
     <div class="m-row"><div class="lb">Base currency</div><div class="vl">${esc(t.currency || 'MVR')}</div></div>
     <div class="m-row"><div class="lb">Plan</div><div class="vl">${PLAN_LABELS[t.plan]} · ${fmtRf(PLAN_PRICES[t.plan])}/month</div></div>
+    ${t.promoCode ? '<div class="m-row"><div class="lb">🎁 Promo Code</div><div class="vl" style="color:#166534;font-weight:800">' + esc(t.promoCode) + ' — ' + esc(t.promoLabel || '') + '</div></div>' : ''}
     <div class="m-row"><div class="lb">Status</div><div class="vl">${status.toUpperCase()} · ${daysLeft >= 0 ? daysLeft+' days remaining' : Math.abs(daysLeft)+' days expired'}</div></div>
     <div class="m-row"><div class="lb">Trial started</div><div class="vl">${fmtDate(t.trialStart)}</div></div>
     <div class="m-row"><div class="lb">Trial ends</div><div class="vl">${fmtDate(t.trialEnd)}</div></div>

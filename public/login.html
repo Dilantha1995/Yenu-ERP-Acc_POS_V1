@@ -202,11 +202,14 @@ function doLogin(){
     role: matchedUser.role,
     label: matchedUser.label,
     color: matchedUser.color || '#1849a9',
-    access: matchedUser.access || ['accounts','pos'],
+    access: matchedUser.access || ['accounts','pos','setup'],
     tenant: matchedTenant.slug,
     coName: matchedTenant.coName,
     plan: matchedTenant.plan,
     trialEnd: matchedTenant.trialEnd,
+    plan_status: matchedTenant.status,
+    promoCode: matchedTenant.promoCode,
+    promoLabel: matchedTenant.promoLabel,
     demo: true
   };
   localStorage.setItem(ME_KEY, JSON.stringify(session));

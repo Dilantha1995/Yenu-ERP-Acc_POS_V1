@@ -213,7 +213,9 @@ function init(){
   document.getElementById('coPill').textContent = session.coName || 'Workspace';
   document.getElementById('footUser').textContent = (session.coName||'') + ' · ' + (session.email||'');
   document.getElementById('footPlan').textContent =
-    session.plan ? `Plan: ${PLAN_LABELS[session.plan]||session.plan}` + (trialDaysLeft!=null && trialDaysLeft>0 ? ` · ${trialDaysLeft} day${trialDaysLeft===1?'':'s'} left in trial` : '')
+    session.promoCode
+      ? `🎁 ${PLAN_LABELS[session.plan]||session.plan} plan · FREE via promo`
+      : session.plan ? `Plan: ${PLAN_LABELS[session.plan]||session.plan}` + (trialDaysLeft!=null && trialDaysLeft>0 ? ` · ${trialDaysLeft} day${trialDaysLeft===1?'':'s'} left in trial` : '')
                  : 'Demo mode';
 
   if (session.impersonated) {
@@ -263,6 +265,20 @@ function renderFirstRunBanner(){
 function renderTrialBanner(){
   const b = document.getElementById('trialBanner');
   const m = document.getElementById('trialMsg');
+
+  // Promo code holder — show a green free-access banner
+  if (session.promoCode) {
+    b.style.display = 'flex';
+    b.className = 'trial-banner';
+    b.style.background = 'linear-gradient(135deg,#dcfce7,#bbf7d0)';
+    b.style.borderBottomColor = '#86efac';
+    m.style.color = '#14532d';
+    m.innerHTML = `<b>🎁 FREE ACCESS ACTIVE</b> — Promo "${session.promoLabel || session.promoCode}" · No charge until ${new Date(session.trialEnd).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`;
+    const btn = b.querySelector('.upg');
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+
   if (!session.trialEnd || session.plan_status === 'active') { b.style.display = 'none'; return; }
   b.style.display = 'flex';
   if (trialDaysLeft < 0) {
@@ -284,10 +300,10 @@ function moduleAllowedByPlan(mod){
 
 function renderModules(){
   const access = session.access || ['accounts','pos'];
-  const expired = trialDaysLeft != null && trialDaysLeft < 0 && session.plan_status !== 'active';
+  const expired = trialDaysLeft != null && trialDaysLeft < 0 && session.plan_status !== 'active' && !session.promoCode;
 
   document.getElementById('moduleGrid').innerHTML = MODULES.map(m => {
-    const inAccess = access.includes(m.id);
+    const inAccess = access.includes(m.id) || m.alwaysOpen;
     const inPlan   = moduleAllowedByPlan(m);
     const available = !!m.file;
     const locked = !inAccess || !inPlan || !available || expired;

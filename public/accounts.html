@@ -2,9 +2,7 @@
 <html lang="en">
 <head>
 <!-- ═══════════════════════════════════════════════════════════════════
-     YENUERP TENANT ADAPTER  (auto-injected, runs before module seeds)
-     Exposes window._YENU with the current tenant's setup data so the
-     module can use it instead of hardcoded demo seeds.
+     YENUERP TENANT ADAPTER (v2)  — auto-injected, exposes window._YENU
      ═══════════════════════════════════════════════════════════════════ -->
 <script>
 (function(){
@@ -21,10 +19,30 @@
   const tax       = _yget(PREFIX + 'tax');
   const branding  = _yget(PREFIX + 'branding');
   const users     = _yget(PREFIX + 'users') || [];
+  const posSet    = _yget(PREFIX + 'pos-settings') || {};
+  const accSet    = _yget(PREFIX + 'accounts-settings') || {};
 
   const typeMap = { ast:'ASSET', lia:'LIABILITY', eq:'EQUITY', rev:'REVENUE', exp:'EXPENSE' };
   const pad = (n,w) => String(n).padStart(w,'0');
   const slugId = (sess.tenant || 'TNT').toUpperCase().replace(/-/g,'').slice(0,6);
+
+  // Normalise users to ensure modules object exists
+  function _norm(u) {
+    if (!u.modules) {
+      const old = u.access || [];
+      u.modules = {
+        accounts: { access: old.includes('accounts'), role: u.role || 'accountant', canPost:true, canApprove:false, canClose:false },
+        pos:      { access: old.includes('pos'), role: 'cashier', defaultStore:'MAIN', canVoid:false, canDiscount:true, maxDiscountPct:10, canRefund:false },
+        setup:    { access: false, role: 'viewer' },
+        payflow:  { access: old.includes('payflow'), role: 'user' },
+        hr:       { access: old.includes('hr'), role: 'user' }
+      };
+    }
+    if (!u.pin) u.pin = '1234';
+    if (u.active === undefined) u.active = true;
+    return u;
+  }
+  const normUsers = users.map(_norm);
 
   window._YENU = {
     session: sess,
@@ -46,11 +64,9 @@
     } : null,
 
     coa: coa.length > 0 ? coa.map(a => ({
-      code: a.code,
-      name: a.name,
+      code: a.code, name: a.name,
       type: typeMap[a.type] || 'ASSET',
-      parent: null,
-      isGroup: false,
+      parent: null, isGroup: false,
       normal: a.normal
     })) : null,
 
@@ -83,12 +99,12 @@
       sellPrice: it.price || 0,
       stock: it.stock || 0,
       reorderLvl: 0,
-      glRev: it.glRev || '4000',
-      glCogs: it.glCogs || '5000',
-      glInv: it.glInv || '1300'
+      glRev: it.glRev || (accSet.defaultAccounts && accSet.defaultAccounts.sales) || '4000',
+      glCogs: it.glCogs || (accSet.defaultAccounts && accSet.defaultAccounts.cogs) || '5000',
+      glInv: it.glInv || (accSet.defaultAccounts && accSet.defaultAccounts.inventory) || '1300'
     })) : null,
 
-    // POS-specific format
+    // POS-specific company config
     posCompany: company ? {
       name: company.name,
       address: company.address || '',
@@ -97,60 +113,92 @@
       website: company.website || '',
       registrationNo: company.regNumber || '',
       tinNumber: company.tin || '',
-      receiptFooter: (branding && branding.invoiceFooter) || 'Thank you for shopping with us!',
+      receiptFooter: (posSet.receipt && posSet.receipt.footerMessage) || (branding && branding.invoiceFooter) || 'Thank you for shopping with us!',
+      receiptHeaderMessage: (posSet.receipt && posSet.receipt.headerMessage) || '',
       logo: '🏢',
-      receiptHeaderMessage: '',
-      receiptShowLogo: true,
-      receiptShowTin: !!company.tin,
-      receiptShowCashier: true,
-      receiptShowRegister: true,
-      receiptShowItemSku: false,
-      receiptShowBarcode: true,
-      receiptShowLoyalty: true,
-      receiptShowPoweredBy: true,
+      receiptShowLogo:     (posSet.receipt && posSet.receipt.showLogo)     !== false,
+      receiptShowTin:      !!company.tin && ((posSet.receipt && posSet.receipt.showTax) !== false),
+      receiptShowCashier:  (posSet.receipt && posSet.receipt.showCashier)  !== false,
+      receiptShowRegister: (posSet.receipt && posSet.receipt.showRegister) !== false,
+      receiptShowItemSku:  false,
+      receiptShowBarcode:  (posSet.receipt && posSet.receipt.showBarcode)  !== false,
+      receiptShowLoyalty:  (posSet.receipt && posSet.receipt.showLoyalty)  !== false,
+      receiptShowPoweredBy:(posSet.receipt && posSet.receipt.showPoweredBy)!== false,
       currency: company.currency || 'MVR',
       currencySymbol: company.currency === 'MVR' ? 'Rf' : (company.currency || 'Rf'),
       gstRate: (tax && tax.gstRate) || 8,
       gstEnabled: !!(tax && tax.gstEnabled)
     } : null,
 
+    // POS users — owner + invited team members with POS access
     posUsers: (function(){
       const arr = [];
-      // Add owner from session
+      // Owner always has full POS access
       arr.push({
         id: 'owner',
         name: sess.name,
-        initials: sess.short || sess.name?.split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase() || 'U',
+        initials: sess.short || (sess.name||'U').split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
         role: 'admin',
         email: sess.email,
-        pin: '1234',
+        pin: '0000',
         store: null,
         color: sess.color || '#0d2d6e',
-        active: true
+        active: true,
+        canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
       });
-      // Add team users from setup
-      users.forEach((u, i) => {
+      // Invited users with POS access
+      normUsers.filter(u => u.modules.pos && u.modules.pos.access && u.active !== false).forEach((u, i) => {
+        const p = u.modules.pos;
         arr.push({
-          id: u.email.split('@')[0] || ('u' + i),
+          id: (u.email || 'u'+i).split('@')[0],
           name: u.name,
-          initials: u.short || u.name?.split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase() || 'U',
-          role: u.role || 'cashier',
+          initials: u.short || u.name.split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
+          role: p.role || 'cashier',
           email: u.email,
-          pin: '1234',
-          store: 'MAIN',
+          pin: u.pin || '1234',
+          store: p.defaultStore || 'MAIN',
           color: u.color || '#1849a9',
-          active: true
+          active: u.active !== false,
+          canVoid: p.canVoid || false,
+          canDiscount: p.canDiscount !== false,
+          maxDiscountPct: p.maxDiscountPct || 10,
+          canRefund: p.canRefund || false
         });
       });
       return arr;
     })(),
 
+    posSettings: posSet,
+    posStores: posSet.stores || [{id:'MAIN', name:'Main Branch', address:'', active:true}],
+    posRegisters: posSet.registers || [{id:'REG-01', name:'Counter 1', storeId:'MAIN'}],
+    posPaymentMethods: (posSet.paymentMethods || [
+      { id:'CASH', name:'Cash', enabled:true },
+      { id:'CARD', name:'Card', enabled:true },
+      { id:'BANK', name:'Bank Transfer', enabled:true }
+    ]).filter(p => p.enabled),
+
+    accountsSettings: accSet,
     tax: tax,
-    branding: branding
+    branding: branding,
+
+    // Current logged-in user's per-module permissions
+    currentUserPerms: (function(){
+      // Owner has everything
+      return {
+        accounts: { access:true, role:'admin', canPost:true, canApprove:true, canClose:true },
+        pos:      { access:true, role:'admin', canVoid:true, canDiscount:true, maxDiscountPct:100, canRefund:true },
+        setup:    { access:true, role:'admin' }
+      };
+    })()
   };
-  console.log('[YENU] Tenant adapter loaded:', window._YENU.coName, 'configured:', window._YENU.hasSetup);
+  console.log('[YENU] Tenant adapter v2 loaded:', window._YENU.coName,
+              '| configured:', window._YENU.hasSetup,
+              '| posUsers:', window._YENU.posUsers.length,
+              '| stores:', window._YENU.posStores.length);
 })();
 </script>
+
+
 
 
 <script src="/erp-bridge.js"></script>

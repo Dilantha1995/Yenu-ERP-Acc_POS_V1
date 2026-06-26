@@ -273,9 +273,13 @@ const NAV = [
     { key: 'customers', label: 'Customers',        ic: '👥' },
     { key: 'vendors',   label: 'Vendors',          ic: '🚚' }
   ]},
+  { sec: 'Module Settings', items: [
+    { key: 'pos_settings',      label: 'POS Configuration',     ic: '🛒' },
+    { key: 'accounts_settings', label: 'Accounts Configuration', ic: '📒' }
+  ]},
   { sec: 'Team & Data', items: [
-    { key: 'users',     label: 'Users & Roles',    ic: '👤' },
-    { key: 'data',      label: 'Import / Export',  ic: '📥' }
+    { key: 'users',     label: 'Users & Permissions', ic: '👤' },
+    { key: 'data',      label: 'Import / Export',     ic: '📥' }
   ]}
 ];
 
@@ -1457,35 +1461,92 @@ function saveBranding() {
   renderSidebar();
 }
 
-/* ── USERS & ROLES ── */
+
+/* ── USERS & PERMISSIONS (enhanced with per-module matrix) ── */
+function _ownerUser() {
+  // Build an "owner" user object that always exists for the logged-in session
+  return {
+    email: session.email,
+    name: session.name,
+    short: session.short || (session.name||'U').split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
+    color: session.color || '#0d2d6e',
+    pin: '0000',
+    active: true,
+    isOwner: true,
+    modules: {
+      accounts: { access:true, role:'admin', canPost:true, canApprove:true, canClose:true },
+      pos:      { access:true, role:'admin', defaultStore:'MAIN', canVoid:true, canDiscount:true, maxDiscountPct:100, canRefund:true },
+      setup:    { access:true, role:'admin' },
+      payflow:  { access:true, role:'admin' },
+      hr:       { access:true, role:'admin' }
+    }
+  };
+}
+
+function _normaliseUser(u) {
+  // Migrate older user format to new format with per-module permissions
+  if (!u.modules) {
+    const old = u.access || ['accounts'];
+    u.modules = {
+      accounts: { access: old.includes('accounts'), role: u.role || 'accountant', canPost: true, canApprove: false, canClose: false },
+      pos:      { access: old.includes('pos'), role: u.role === 'manager' ? 'manager' : 'cashier', defaultStore:'MAIN', canVoid:false, canDiscount:true, maxDiscountPct:10, canRefund:false },
+      setup:    { access: false, role: 'viewer' },
+      payflow:  { access: old.includes('payflow'), role: 'user' },
+      hr:       { access: old.includes('hr'), role: 'user' }
+    };
+  }
+  if (!u.pin) u.pin = '1234';
+  if (u.active === undefined) u.active = true;
+  return u;
+}
+
+function _moduleBadges(u) {
+  const mods = [];
+  if (u.modules?.accounts?.access) mods.push({ ic:'📒', lbl:'Accounts', role:u.modules.accounts.role, color:'#1849a9', bg:'#eef2fc' });
+  if (u.modules?.pos?.access)      mods.push({ ic:'🛒', lbl:'POS',      role:u.modules.pos.role,      color:'#166534', bg:'#f0fdf4' });
+  if (u.modules?.setup?.access)    mods.push({ ic:'⚙', lbl:'Setup',    role:u.modules.setup.role,    color:'#92400e', bg:'#fffbeb' });
+  if (u.modules?.payflow?.access)  mods.push({ ic:'💳', lbl:'PayFlow',  role:u.modules.payflow.role,  color:'#6b21a8', bg:'#faf5ff' });
+  if (u.modules?.hr?.access)       mods.push({ ic:'👥', lbl:'HR',       role:u.modules.hr.role,       color:'#0891b2', bg:'#ecfeff' });
+  if (mods.length === 0) return '<span style="color:var(--t3);font-size:10.5px">— no access —</span>';
+  return mods.map(m => `<span class="bdg" style="background:${m.bg};color:${m.color};margin-right:3px" title="${m.lbl} · ${m.role}">${m.ic} ${m.role}</span>`).join('');
+}
+
 function view_users() {
-  const users = tstore.get('users') || [];
-  // Always include owner from session
-  const allUsers = [
-    { email: session.email, name: session.name, role: 'owner', label: 'Owner / Admin', isOwner: true },
-    ...users
-  ];
+  const rawUsers = tstore.get('users') || [];
+  const teamUsers = rawUsers.map(_normaliseUser);
+  const allUsers = [_ownerUser(), ...teamUsers];
+
   document.getElementById('main').innerHTML = `
     <div class="ph">
-      <div><div class="pt">👤 Users & Roles</div><div class="ps">${allUsers.length} user${allUsers.length===1?'':'s'} can access this workspace</div></div>
+      <div><div class="pt">👤 Users & Permissions</div><div class="ps">${allUsers.length} user${allUsers.length===1?'':'s'} · each user gets specific access to each module</div></div>
       <div class="brow"><button class="btn btn-p" onclick="editUser()">＋ Invite user</button></div>
     </div>
 
     <div class="card">
-      <div class="ch"><div class="ct">Team members</div></div>
+      <div class="ch">
+        <div><div class="ct">Team members</div><div class="cs">Owner has full access · invited users have per-module permissions you control</div></div>
+      </div>
       <div class="tw">
         <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Modules</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>PIN</th><th>Module Access</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${allUsers.map(u => `
               <tr>
-                <td><b>${esc(u.name)}</b>${u.isOwner?' <span class="bdg b-asset" style="margin-left:5px">OWNER</span>':''}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:9px">
+                    <div style="width:30px;height:30px;border-radius:50%;background:${u.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px">${u.short}</div>
+                    <div>
+                      <b>${esc(u.name)}</b>${u.isOwner?' <span class="bdg b-asset" style="margin-left:4px">OWNER</span>':''}
+                    </div>
+                  </div>
+                </td>
                 <td>${esc(u.email)}</td>
-                <td>${esc(u.label || u.role)}</td>
-                <td>${(u.access||['accounts','pos']).map(a=>`<span class="bdg" style="background:#e0e7ff;color:#3730a3;margin-right:3px">${a}</span>`).join('')}</td>
+                <td><span class="mono">${u.pin||'—'}</span></td>
+                <td>${_moduleBadges(u)}</td>
+                <td>${u.active===false ? '<span class="bdg b-exp">Disabled</span>' : '<span class="bdg b-rev">Active</span>'}</td>
                 <td class="row-actions">
                   ${u.isOwner ? '<span style="color:var(--t3);font-size:10.5px">(you)</span>' : `
-                    <button class="btn btn-xs" onclick='editUser(${JSON.stringify(u)})'>Edit</button>
+                    <button class="btn btn-xs" onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})'>Edit</button>
                     <button class="btn btn-xs" onclick='deleteUser("${esc(u.email)}")' style="color:var(--red)">×</button>
                   `}
                 </td>
@@ -1494,78 +1555,662 @@ function view_users() {
         </table>
       </div>
     </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">How module permissions work</div></div>
+      <div class="cb" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;font-size:12px">
+        <div style="background:var(--blue2);padding:12px;border-radius:8px;border-left:3px solid var(--blue)">
+          <div style="font-weight:800;color:var(--blue3);margin-bottom:4px">📒 AccountsCore</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.45">Roles: <b>Viewer</b> · <b>Accountant</b> (post entries) · <b>Controller</b> (approve) · <b>Admin</b> (close periods)</div>
+        </div>
+        <div style="background:var(--green2);padding:12px;border-radius:8px;border-left:3px solid var(--green)">
+          <div style="font-weight:800;color:var(--green);margin-bottom:4px">🛒 RetailFlow POS</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.45">Roles: <b>Cashier</b> · <b>Supervisor</b> (discounts) · <b>Manager</b> (voids/refunds) · <b>Admin</b></div>
+        </div>
+        <div style="background:var(--amber2);padding:12px;border-radius:8px;border-left:3px solid #d97706">
+          <div style="font-weight:800;color:var(--amber);margin-bottom:4px">⚙ Company Setup</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.45">Roles: <b>Viewer</b> · <b>Editor</b> (edit master data) · <b>Admin</b> (full control)</div>
+        </div>
+        <div style="background:#faf5ff;padding:12px;border-radius:8px;border-left:3px solid var(--purple)">
+          <div style="font-weight:800;color:var(--purple);margin-bottom:4px">💳 PayFlow Pro</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.45">Roles: <b>User</b> · <b>Approver</b> · <b>Admin</b></div>
+        </div>
+      </div>
+    </div>
   `;
 }
+
+let _editTab = 'profile';
 function editUser(u) {
   const isNew = !u;
-  u = u || { email:'', name:'', role:'accountant', label:'', access:['accounts'] };
+  u = u ? _normaliseUser(u) : {
+    email:'', name:'', short:'', color:'#1849a9', pin:'1234', active:true,
+    modules: {
+      accounts: { access:true, role:'accountant', canPost:true, canApprove:false, canClose:false },
+      pos:      { access:false, role:'cashier', defaultStore:'MAIN', canVoid:false, canDiscount:true, maxDiscountPct:10, canRefund:false },
+      setup:    { access:false, role:'viewer' },
+      payflow:  { access:false, role:'user' },
+      hr:       { access:false, role:'user' }
+    }
+  };
+  _editTab = 'profile';
+  _renderEditUser(isNew, u);
+}
+
+function _renderEditUser(isNew, u) {
+  const tabs = [
+    { k:'profile',  l:'👤 Profile' },
+    { k:'accounts', l:'📒 Accounts' },
+    { k:'pos',      l:'🛒 POS' },
+    { k:'setup',    l:'⚙ Setup' },
+    { k:'other',    l:'💳 Other' }
+  ];
+  const tabBar = tabs.map(t => `<div class="m-tab ${_editTab===t.k?'on':''}" onclick="_setEditTab('${t.k}', ${isNew}, ${JSON.stringify(u).replace(/"/g,'&quot;')})">${t.l}</div>`).join('');
+
+  let body = '';
+  if (_editTab === 'profile') {
+    body = `
+      <div class="fg2">
+        <div class="fg"><label class="fl">Full name <span class="req">*</span></label>
+          <input class="fi" id="uf_name" value="${esc(u.name)}" required onchange="_updateInitials()"></div>
+        <div class="fg"><label class="fl">Email <span class="req">*</span></label>
+          <input class="fi" type="email" id="uf_email" value="${esc(u.email)}" required ${isNew?'':'readonly'}></div>
+      </div>
+      <div class="fg3">
+        <div class="fg"><label class="fl">Initials</label>
+          <input class="fi" id="uf_short" value="${esc(u.short)}" maxlength="3" style="font-family:Consolas;text-align:center;font-weight:700"></div>
+        <div class="fg"><label class="fl">PIN (4 digits) <span class="req">*</span></label>
+          <input class="fi" id="uf_pin" value="${esc(u.pin||'1234')}" pattern="[0-9]{4}" maxlength="4" required style="font-family:Consolas;letter-spacing:.3em;text-align:center">
+          <div class="fhelp">Used for quick login in POS</div></div>
+        <div class="fg"><label class="fl">Avatar color</label>
+          <div style="display:flex;gap:6px;align-items:center"><input type="color" id="uf_color" value="${u.color}" style="width:46px;height:36px;border:1px solid var(--border);border-radius:7px;cursor:pointer">
+          <input class="fi" id="uf_colorText" value="${u.color}" style="font-family:Consolas" oninput="document.getElementById('uf_color').value=this.value"></div>
+        </div>
+      </div>
+      <div class="fg">
+        <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="uf_active" ${u.active!==false?'checked':''} style="width:18px;height:18px;accent-color:var(--blue)">
+          <span><b>Account active</b> — user can sign in</span>
+        </label>
+      </div>
+    `;
+  } else if (_editTab === 'accounts') {
+    const m = u.modules.accounts;
+    body = `
+      <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13.5px;margin-bottom:14px">
+        <input type="checkbox" id="m_accounts_access" ${m.access?'checked':''} style="width:20px;height:20px;accent-color:var(--blue)">
+        <span><b>Allow access to AccountsCore</b> — General ledger, journals, financials</span>
+      </label>
+      <div class="fg">
+        <label class="fl">Role within AccountsCore</label>
+        <select class="fs" id="m_accounts_role">
+          ${[['viewer','Viewer — read-only access to GL and reports'],
+             ['accountant','Accountant — can post journal entries'],
+             ['controller','Controller — can approve and unlock entries'],
+             ['admin','Admin — full access, close periods, manage COA']]
+            .map(([k,l])=>`<option value="${k}" ${m.role===k?'selected':''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg" style="background:var(--bg);padding:12px 14px;border-radius:8px">
+        <div class="fl">Specific permissions</div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 0;cursor:pointer">
+          <input type="checkbox" id="m_accounts_canPost" ${m.canPost?'checked':''} style="accent-color:var(--blue)">Can post journal entries</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 0;cursor:pointer">
+          <input type="checkbox" id="m_accounts_canApprove" ${m.canApprove?'checked':''} style="accent-color:var(--blue)">Can approve/unlock entries</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 0;cursor:pointer">
+          <input type="checkbox" id="m_accounts_canClose" ${m.canClose?'checked':''} style="accent-color:var(--blue)">Can close accounting periods</label>
+      </div>
+    `;
+  } else if (_editTab === 'pos') {
+    const m = u.modules.pos;
+    const posSettings = tstore.get('pos-settings') || {};
+    const stores = (posSettings.stores && posSettings.stores.length) ? posSettings.stores : [{id:'MAIN',name:'Main Branch'}];
+    body = `
+      <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13.5px;margin-bottom:14px">
+        <input type="checkbox" id="m_pos_access" ${m.access?'checked':''} style="width:20px;height:20px;accent-color:var(--blue)">
+        <span><b>Allow access to RetailFlow POS</b> — Point of sale, cash drawer, sales</span>
+      </label>
+      <div class="fg2">
+        <div class="fg">
+          <label class="fl">Role in POS</label>
+          <select class="fs" id="m_pos_role">
+            ${[['cashier','Cashier — register sales only'],
+               ['supervisor','Supervisor — also discounts'],
+               ['manager','Manager — voids and refunds'],
+               ['admin','Admin — full POS access']]
+              .map(([k,l])=>`<option value="${k}" ${m.role===k?'selected':''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fg">
+          <label class="fl">Default store / location</label>
+          <select class="fs" id="m_pos_defaultStore">
+            ${stores.map(s=>`<option value="${s.id}" ${m.defaultStore===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="fg" style="background:var(--bg);padding:12px 14px;border-radius:8px">
+        <div class="fl">Cashier permissions</div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 0;cursor:pointer">
+          <input type="checkbox" id="m_pos_canDiscount" ${m.canDiscount?'checked':''} style="accent-color:var(--blue)">Can apply discounts</label>
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0 5px 28px;font-size:12.5px;color:var(--t2)">
+          → Maximum discount %:
+          <input class="fi" id="m_pos_maxDiscountPct" type="number" min="0" max="100" step="1" value="${m.maxDiscountPct||10}" style="width:80px;padding:5px 8px">
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 0;cursor:pointer">
+          <input type="checkbox" id="m_pos_canVoid" ${m.canVoid?'checked':''} style="accent-color:var(--blue)">Can void sales</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 0;cursor:pointer">
+          <input type="checkbox" id="m_pos_canRefund" ${m.canRefund?'checked':''} style="accent-color:var(--blue)">Can process refunds / returns</label>
+      </div>
+    `;
+  } else if (_editTab === 'setup') {
+    const m = u.modules.setup;
+    body = `
+      <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13.5px;margin-bottom:14px">
+        <input type="checkbox" id="m_setup_access" ${m.access?'checked':''} style="width:20px;height:20px;accent-color:var(--blue)">
+        <span><b>Allow access to Company Setup</b> — configure company, COA, products, etc.</span>
+      </label>
+      <div class="fg">
+        <label class="fl">Role within Setup</label>
+        <select class="fs" id="m_setup_role">
+          ${[['viewer','Viewer — read-only view of configuration'],
+             ['editor','Editor — edit master data (products, customers, COA)'],
+             ['admin','Admin — full setup control including users and billing']]
+            .map(([k,l])=>`<option value="${k}" ${m.role===k?'selected':''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div style="background:var(--amber2);padding:10px 12px;border-radius:8px;font-size:11.5px;color:var(--amber);line-height:1.5">
+        ⚠ Only give Setup Admin access to trusted users — they can change company-wide data including chart of accounts and users.
+      </div>
+    `;
+  } else if (_editTab === 'other') {
+    const mp = u.modules.payflow;
+    const mh = u.modules.hr;
+    body = `
+      <div class="fg">
+        <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13.5px">
+          <input type="checkbox" id="m_payflow_access" ${mp.access?'checked':''} style="width:20px;height:20px;accent-color:var(--blue)">
+          <span><b>💳 PayFlow Pro</b> — Payment vouchers and approvals</span>
+        </label>
+        <div style="padding-left:30px;margin-top:6px">
+          <label class="fl">Role</label>
+          <select class="fs" id="m_payflow_role" style="max-width:300px">
+            <option value="user" ${mp.role==='user'?'selected':''}>User — create payment vouchers</option>
+            <option value="approver" ${mp.role==='approver'?'selected':''}>Approver — approve payments</option>
+            <option value="admin" ${mp.role==='admin'?'selected':''}>Admin — full access</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg" style="margin-top:18px">
+        <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13.5px">
+          <input type="checkbox" id="m_hr_access" ${mh.access?'checked':''} style="width:20px;height:20px;accent-color:var(--blue)">
+          <span><b>👥 PeopleFlow HR</b> — Employees and payroll</span>
+        </label>
+        <div style="padding-left:30px;margin-top:6px">
+          <label class="fl">Role</label>
+          <select class="fs" id="m_hr_role" style="max-width:300px">
+            <option value="user" ${mh.role==='user'?'selected':''}>User — view own profile and submit timesheets</option>
+            <option value="hr" ${mh.role==='hr'?'selected':''}>HR — manage all employees and run payroll</option>
+            <option value="admin" ${mh.role==='admin'?'selected':''}>Admin — full HR access</option>
+          </select>
+        </div>
+      </div>
+    `;
+  }
+
   showModal(`
     <div class="m-head">
-      <div><div class="m-tt">${isNew?'Invite':'Edit'} User</div></div>
+      <div><div class="m-tt">${isNew?'Invite':'Edit'} User</div><div class="m-sb">${u.email || 'new team member'}</div></div>
       <button class="m-close" onclick="closeModal()">×</button>
     </div>
+    <div style="background:#fff;border-bottom:1px solid var(--border);padding:0 22px;display:flex;gap:0;overflow-x:auto">
+      <style>
+        .m-tab{padding:11px 16px;font-size:12px;font-weight:700;color:var(--t2);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+        .m-tab:hover{color:var(--blue)}
+        .m-tab.on{color:var(--blue);border-bottom-color:var(--blue)}
+      </style>
+      ${tabBar}
+    </div>
     <div class="m-body">
-      <form id="usForm" onsubmit="event.preventDefault();saveUser(${isNew},'${esc(u.email)}')">
-        <div class="fg"><label class="fl">Full name <span class="req">*</span></label><input class="fi" name="name" value="${esc(u.name)}" required></div>
-        <div class="fg"><label class="fl">Email <span class="req">*</span></label><input class="fi" type="email" name="email" value="${esc(u.email)}" required ${isNew?'':'readonly'}></div>
-        <div class="fg2">
-          <div class="fg"><label class="fl">Role</label>
-            <select class="fs" name="role" onchange="updateRoleLabel(this.value)">
-              ${[['accountant','Accountant'],['controller','Controller'],['cashier','Cashier'],['manager','Manager'],['auditor','Auditor (read-only)'],['custom','Custom']]
-                .map(([k,l])=>`<option value="${k}" ${u.role===k?'selected':''}>${l}</option>`).join('')}
-            </select></div>
-          <div class="fg"><label class="fl">Job title</label><input class="fi" name="label" value="${esc(u.label||'')}" placeholder="e.g. Senior Accountant"></div>
-        </div>
-        <div class="fg"><label class="fl">Module access</label>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            ${[['accounts','📒 AccountsCore'],['pos','🛒 RetailFlow POS'],['payflow','💳 PayFlow Pro'],['hr','👥 PeopleFlow HR']].map(([k,l])=>`
-              <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">
-                <input type="checkbox" name="access" value="${k}" ${(u.access||[]).includes(k)?'checked':''} style="accent-color:var(--blue)">
-                ${l}
-              </label>`).join('')}
-          </div>
-        </div>
-        <div class="fg" style="background:var(--blue2);padding:10px 12px;border-radius:8px;font-size:11.5px;color:var(--blue3)">
-          ℹ Note: When you save, this person will be added to your team. Email them their workspace URL: <b>${location.host}</b>.
-          They'll sign in using this email — set their password by going to Sign In and using "Forgot password".
-        </div>
-      </form>
+      ${body}
     </div>
     <div class="m-foot">
       <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-p" onclick="document.getElementById('usForm').requestSubmit()">${isNew?'Send invitation':'Save'}</button>
+      <button class="btn btn-p" onclick="saveUser(${isNew}, '${esc(u.email)}')">${isNew?'Send invitation':'Save changes'}</button>
     </div>
-  `);
+  `, true);
 }
-function saveUser(isNew, oldEmail) {
-  const f = document.getElementById('usForm');
-  const data = { access: [] };
-  for (const el of f.elements) {
-    if (!el.name) continue;
-    if (el.type === 'checkbox') { if (el.checked) data.access.push(el.value); }
-    else data[el.name] = el.value;
+
+function _setEditTab(tab, isNew, u) {
+  // First, capture any current input from the open tab
+  _captureEditUserInputs(window._editingUser || u);
+  window._editingUser = window._editingUser || u;
+  _editTab = tab;
+  _renderEditUser(isNew, window._editingUser);
+}
+
+function _captureEditUserInputs(u) {
+  // Read fields from whichever tab is currently rendered
+  const get = id => document.getElementById(id);
+  if (get('uf_name')) {
+    u.name = get('uf_name').value.trim();
+    u.email = get('uf_email').value.trim().toLowerCase();
+    u.short = get('uf_short').value.trim().toUpperCase();
+    u.pin = get('uf_pin').value;
+    u.color = get('uf_color').value;
+    u.active = get('uf_active').checked;
   }
-  data.short = (data.name.split(' ')[0][0] + (data.name.split(' ')[1]?.[0] || '')).toUpperCase();
-  data.color = '#1849a9';
+  if (get('m_accounts_access')) {
+    u.modules.accounts = {
+      access: get('m_accounts_access').checked,
+      role: get('m_accounts_role').value,
+      canPost: get('m_accounts_canPost').checked,
+      canApprove: get('m_accounts_canApprove').checked,
+      canClose: get('m_accounts_canClose').checked
+    };
+  }
+  if (get('m_pos_access')) {
+    u.modules.pos = {
+      access: get('m_pos_access').checked,
+      role: get('m_pos_role').value,
+      defaultStore: get('m_pos_defaultStore').value,
+      canDiscount: get('m_pos_canDiscount').checked,
+      maxDiscountPct: parseInt(get('m_pos_maxDiscountPct').value)||10,
+      canVoid: get('m_pos_canVoid').checked,
+      canRefund: get('m_pos_canRefund').checked
+    };
+  }
+  if (get('m_setup_access')) {
+    u.modules.setup = {
+      access: get('m_setup_access').checked,
+      role: get('m_setup_role').value
+    };
+  }
+  if (get('m_payflow_access')) {
+    u.modules.payflow = {
+      access: get('m_payflow_access').checked,
+      role: get('m_payflow_role').value
+    };
+    u.modules.hr = {
+      access: get('m_hr_access').checked,
+      role: get('m_hr_role').value
+    };
+  }
+}
+
+function _updateInitials() {
+  const name = document.getElementById('uf_name').value.trim();
+  if (!name) return;
+  const parts = name.split(' ');
+  const initials = (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+  document.getElementById('uf_short').value = initials;
+}
+
+function saveUser(isNew, oldEmail) {
+  const u = window._editingUser || { modules:{} };
+  _captureEditUserInputs(u);
+
+  if (!u.name || !u.email) { toast('Name and email required', true); return; }
+  if (!/^\d{4}$/.test(u.pin)) { toast('PIN must be 4 digits', true); return; }
+
+  // Compute legacy access array for backward compat
+  u.access = [];
+  if (u.modules.accounts?.access) u.access.push('accounts');
+  if (u.modules.pos?.access)      u.access.push('pos');
+  if (u.modules.setup?.access)    u.access.push('setup');
+  if (u.modules.payflow?.access)  u.access.push('payflow');
+  if (u.modules.hr?.access)       u.access.push('hr');
+
+  u.role = u.modules.accounts?.role || u.modules.pos?.role || 'user';
+  u.label = u.role.charAt(0).toUpperCase() + u.role.slice(1);
+
   const users = tstore.get('users') || [];
   if (isNew) {
-    if (users.find(u => u.email === data.email)) { toast('User already exists', true); return; }
-    users.push(data);
+    if (users.find(x => x.email === u.email)) { toast('Email already in team', true); return; }
+    users.push(u);
   } else {
-    const idx = users.findIndex(u => u.email === oldEmail);
-    if (idx >= 0) users[idx] = data;
+    const idx = users.findIndex(x => x.email === oldEmail);
+    if (idx >= 0) users[idx] = u;
   }
   tstore.set('users', users);
+  window._editingUser = null;
   closeModal();
-  toast(isNew ? 'User invited ✓' : 'User saved ✓');
+  toast(isNew ? `${u.name} invited ✓` : 'User saved ✓');
   view_users();
   renderSidebar();
 }
+
 function deleteUser(email) {
   if (!confirm('Remove this user from your team?')) return;
   tstore.set('users', (tstore.get('users') || []).filter(u => u.email !== email));
   toast('User removed');
   view_users();
+  renderSidebar();
+}
+
+/* ── POS MODULE SETTINGS ── */
+function view_pos_settings() {
+  const s = tstore.get('pos-settings') || {};
+  const stores = s.stores || [{id:'MAIN', name:'Main Branch', address:'', active:true}];
+  const registers = s.registers || [{id:'REG-01', name:'Counter 1', storeId:'MAIN'}];
+  const pm = s.paymentMethods || [
+    { id:'CASH', name:'Cash', enabled:true, ledgerAcc:'1000' },
+    { id:'CARD', name:'Card', enabled:true, ledgerAcc:'1100' },
+    { id:'BANK', name:'Bank Transfer', enabled:true, ledgerAcc:'1100' },
+    { id:'MMA',  name:'MMA / Mobile Wallet', enabled:false, ledgerAcc:'1100' }
+  ];
+  const r = s.receipt || { headerMessage:'', footerMessage:'Thank you for your business!', showLogo:true, showTax:true, showLoyalty:true, showCashier:true, showRegister:true, showBarcode:true, showPoweredBy:true };
+  const ru = s.rules || { requireCashDrawer:true, allowDiscountAbove:10, returnsAllowed:true, returnsDaysLimit:7, requireCustomerForCredit:true };
+
+  document.getElementById('main').innerHTML = `
+    <div class="ph">
+      <div><div class="pt">🛒 POS Configuration</div><div class="ps">Stores, registers, payment methods and receipt template for RetailFlow POS</div></div>
+      <div class="brow"><button class="btn btn-p" onclick="savePosSettings()">💾 Save all changes</button></div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">Stores / Locations</div><div class="cs">Each store can have its own registers and inventory</div></div>
+      <div class="cb">
+        <div class="tw"><table id="storesTable">
+          <thead><tr><th>Code</th><th>Store name</th><th>Address</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${stores.map((st,i)=>`
+              <tr data-store="${i}">
+                <td><input class="fi" style="width:90px;padding:6px 9px" value="${esc(st.id)}" data-f="id"></td>
+                <td><input class="fi" style="padding:6px 9px" value="${esc(st.name)}" data-f="name"></td>
+                <td><input class="fi" style="padding:6px 9px" value="${esc(st.address||'')}" data-f="address"></td>
+                <td>
+                  <label style="font-size:11.5px;cursor:pointer"><input type="checkbox" data-f="active" ${st.active!==false?'checked':''} style="accent-color:var(--blue)"> Active</label>
+                </td>
+                <td><button class="btn btn-xs" onclick="removeStore(${i})" style="color:var(--red)">×</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>
+        <button class="btn btn-sm" style="margin-top:10px" onclick="addStore()">＋ Add store</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">Registers / Counters</div><div class="cs">Cash registers within each store</div></div>
+      <div class="cb">
+        <div class="tw"><table id="registersTable">
+          <thead><tr><th>Code</th><th>Register name</th><th>Store</th><th></th></tr></thead>
+          <tbody>
+            ${registers.map((rg,i)=>`
+              <tr data-reg="${i}">
+                <td><input class="fi" style="width:110px;padding:6px 9px;font-family:Consolas" value="${esc(rg.id)}" data-f="id"></td>
+                <td><input class="fi" style="padding:6px 9px" value="${esc(rg.name)}" data-f="name"></td>
+                <td><select class="fs" style="padding:6px 9px" data-f="storeId">
+                  ${stores.map(s=>`<option value="${s.id}" ${rg.storeId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
+                </select></td>
+                <td><button class="btn btn-xs" onclick="removeRegister(${i})" style="color:var(--red)">×</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>
+        <button class="btn btn-sm" style="margin-top:10px" onclick="addRegister()">＋ Add register</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">Payment Methods</div><div class="cs">Which payments can cashiers accept?</div></div>
+      <div class="cb">
+        <div class="tw"><table id="pmTable">
+          <thead><tr><th>Code</th><th>Display name</th><th>Linked GL account</th><th>Enabled</th><th></th></tr></thead>
+          <tbody>
+            ${pm.map((p,i)=>`
+              <tr data-pm="${i}">
+                <td><span class="mono">${esc(p.id)}</span></td>
+                <td><input class="fi" style="padding:6px 9px" value="${esc(p.name)}" data-f="name"></td>
+                <td><input class="fi" style="padding:6px 9px;font-family:Consolas;width:120px" value="${esc(p.ledgerAcc)}" data-f="ledgerAcc"></td>
+                <td><label style="cursor:pointer"><input type="checkbox" data-f="enabled" ${p.enabled?'checked':''} style="accent-color:var(--blue)"></label></td>
+                <td><button class="btn btn-xs" onclick="removePm(${i})" style="color:var(--red)">×</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>
+        <button class="btn btn-sm" style="margin-top:10px" onclick="addPm()">＋ Add payment method</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">Receipt Template</div></div>
+      <div class="cb">
+        <div class="fg2">
+          <div class="fg"><label class="fl">Header message (above company name)</label>
+            <input class="fi" id="r_header" value="${esc(r.headerMessage)}" placeholder='e.g. "*** TAX INVOICE ***"'></div>
+          <div class="fg"><label class="fl">Footer message</label>
+            <input class="fi" id="r_footer" value="${esc(r.footerMessage)}"></div>
+        </div>
+        <div class="fl" style="margin-top:6px">Show on receipt:</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;background:var(--bg);padding:12px;border-radius:8px">
+          ${[['showLogo','Logo'],['showTax','Tax breakdown'],['showLoyalty','Loyalty points'],['showCashier','Cashier name'],['showRegister','Register code'],['showBarcode','Barcode/QR'],['showPoweredBy','"Powered by" line']]
+            .map(([k,l])=>`<label style="display:flex;gap:7px;align-items:center;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="r_${k}" ${r[k]?'checked':''} style="accent-color:var(--blue)">${l}</label>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">Operational Rules</div></div>
+      <div class="cb">
+        <div class="fg2">
+          <div class="fg">
+            <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13px;margin-bottom:8px">
+              <input type="checkbox" id="ru_requireCashDrawer" ${ru.requireCashDrawer?'checked':''} style="accent-color:var(--blue)">
+              <span>Require cash drawer open before sale</span>
+            </label>
+            <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13px;margin-bottom:8px">
+              <input type="checkbox" id="ru_returnsAllowed" ${ru.returnsAllowed?'checked':''} style="accent-color:var(--blue)">
+              <span>Allow returns / refunds</span>
+            </label>
+            <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13px">
+              <input type="checkbox" id="ru_requireCustomerForCredit" ${ru.requireCustomerForCredit?'checked':''} style="accent-color:var(--blue)">
+              <span>Require customer link for credit sales</span>
+            </label>
+          </div>
+          <div class="fg">
+            <label class="fl">Manager approval needed above discount %</label>
+            <input class="fi" id="ru_allowDiscountAbove" type="number" value="${ru.allowDiscountAbove||10}" min="0" max="100">
+            <label class="fl" style="margin-top:10px">Days within which returns are allowed</label>
+            <input class="fi" id="ru_returnsDaysLimit" type="number" value="${ru.returnsDaysLimit||7}" min="0" max="365">
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  window._tmpStores = stores;
+  window._tmpRegs = registers;
+  window._tmpPm = pm;
+}
+
+function addStore() { window._tmpStores.push({id:'STORE'+(window._tmpStores.length+1), name:'New Store', address:'', active:true}); view_pos_settings(); }
+function removeStore(i) { window._tmpStores.splice(i,1); _captureStoresFromUi(); view_pos_settings(); }
+function addRegister() { window._tmpRegs.push({id:'REG-'+(window._tmpRegs.length+1).toString().padStart(2,'0'), name:'New Register', storeId:window._tmpStores[0]?.id||'MAIN'}); view_pos_settings(); }
+function removeRegister(i) { window._tmpRegs.splice(i,1); view_pos_settings(); }
+function addPm() {
+  const code = prompt('Payment method code (e.g. CHEQ):');
+  if (!code) return;
+  window._tmpPm.push({id:code.toUpperCase(), name:code, enabled:true, ledgerAcc:'1100'});
+  view_pos_settings();
+}
+function removePm(i) { window._tmpPm.splice(i,1); view_pos_settings(); }
+
+function _captureStoresFromUi() {
+  const rows = document.querySelectorAll('#storesTable tbody tr');
+  window._tmpStores = Array.from(rows).map(tr => {
+    const o = {};
+    tr.querySelectorAll('[data-f]').forEach(el => {
+      o[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+    return o;
+  });
+  const rRows = document.querySelectorAll('#registersTable tbody tr');
+  window._tmpRegs = Array.from(rRows).map(tr => {
+    const o = {};
+    tr.querySelectorAll('[data-f]').forEach(el => {
+      o[el.dataset.f] = el.value;
+    });
+    return o;
+  });
+  const pRows = document.querySelectorAll('#pmTable tbody tr');
+  window._tmpPm = Array.from(pRows).map((tr,i) => {
+    const o = { id: window._tmpPm[i].id };
+    tr.querySelectorAll('[data-f]').forEach(el => {
+      o[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+    return o;
+  });
+}
+
+function savePosSettings() {
+  _captureStoresFromUi();
+  const data = {
+    stores: window._tmpStores,
+    registers: window._tmpRegs,
+    paymentMethods: window._tmpPm,
+    receipt: {
+      headerMessage: document.getElementById('r_header').value,
+      footerMessage: document.getElementById('r_footer').value,
+      showLogo: document.getElementById('r_showLogo').checked,
+      showTax: document.getElementById('r_showTax').checked,
+      showLoyalty: document.getElementById('r_showLoyalty').checked,
+      showCashier: document.getElementById('r_showCashier').checked,
+      showRegister: document.getElementById('r_showRegister').checked,
+      showBarcode: document.getElementById('r_showBarcode').checked,
+      showPoweredBy: document.getElementById('r_showPoweredBy').checked
+    },
+    rules: {
+      requireCashDrawer: document.getElementById('ru_requireCashDrawer').checked,
+      allowDiscountAbove: parseFloat(document.getElementById('ru_allowDiscountAbove').value)||10,
+      returnsAllowed: document.getElementById('ru_returnsAllowed').checked,
+      returnsDaysLimit: parseInt(document.getElementById('ru_returnsDaysLimit').value)||7,
+      requireCustomerForCredit: document.getElementById('ru_requireCustomerForCredit').checked
+    }
+  };
+  tstore.set('pos-settings', data);
+  toast('POS configuration saved ✓');
+  renderSidebar();
+}
+
+/* ── ACCOUNTS MODULE SETTINGS ── */
+function view_accounts_settings() {
+  const s = tstore.get('accounts-settings') || {};
+  const fy = s.fiscalYearStart || '01-01';
+  const numbering = s.numbering || {
+    journals: 'JE-{YYYY}-{####}',
+    invoices: 'INV/{YYYY}/{####}',
+    quotes:   'QT-{YYYY}-{####}',
+    bills:    'BILL-{YYYY}-{####}',
+    payments: 'PMT-{YYYY}-{####}',
+    receipts: 'RCT-{YYYY}-{####}'
+  };
+  const def = s.defaultAccounts || { cash:'1000', bank:'1100', ar:'1200', ap:'2000', sales:'4000', cogs:'5000', inventory:'1300', gstPayable:'2200', gstReceivable:'1410' };
+  const coa = tstore.get('coa') || [];
+
+  function accSelect(id, val) {
+    if (coa.length === 0) return `<input class="fi" id="def_${id}" value="${val}" style="font-family:Consolas">`;
+    return `<select class="fs" id="def_${id}">
+      <option value="">— none —</option>
+      ${coa.map(a=>`<option value="${a.code}" ${val===a.code?'selected':''}>${a.code} — ${esc(a.name)}</option>`).join('')}
+    </select>`;
+  }
+
+  document.getElementById('main').innerHTML = `
+    <div class="ph">
+      <div><div class="pt">📒 Accounts Configuration</div><div class="ps">Fiscal year, document numbering, and default GL accounts</div></div>
+      <div class="brow"><button class="btn btn-p" onclick="saveAccountsSettings()">💾 Save all changes</button></div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">Fiscal Year</div></div>
+      <div class="cb">
+        <div class="fg2">
+          <div class="fg"><label class="fl">Fiscal year starts on</label>
+            <select class="fs" id="fyStart">
+              ${[['01-01','January 1'],['04-01','April 1'],['07-01','July 1'],['10-01','October 1']]
+                .map(([k,l])=>`<option value="${k}" ${fy===k?'selected':''}>${l}</option>`).join('')}
+            </select></div>
+          <div class="fg"><label class="fl">Current period (locked-down for new entries)</label>
+            <input class="fi" id="fyCurrent" value="${esc(s.currentPeriod||new Date().toISOString().slice(0,7))}" placeholder="YYYY-MM">
+            <div class="fhelp">Format: 2026-01 for January 2026</div></div>
+        </div>
+        <div class="fg" style="background:var(--blue2);padding:12px 14px;border-radius:8px;font-size:12px;color:var(--blue3)">
+          ℹ Once a period is closed, no new entries can be posted in that period without admin override.
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">Document Numbering</div><div class="cs">Use {YYYY} for year and {####} for sequence number</div></div>
+      <div class="cb">
+        <div class="fg2">
+          <div class="fg"><label class="fl">Journal entries</label><input class="fi" id="num_journals" value="${esc(numbering.journals)}" style="font-family:Consolas"></div>
+          <div class="fg"><label class="fl">Sales invoices</label><input class="fi" id="num_invoices" value="${esc(numbering.invoices)}" style="font-family:Consolas"></div>
+        </div>
+        <div class="fg2">
+          <div class="fg"><label class="fl">Quotations</label><input class="fi" id="num_quotes" value="${esc(numbering.quotes)}" style="font-family:Consolas"></div>
+          <div class="fg"><label class="fl">Vendor bills</label><input class="fi" id="num_bills" value="${esc(numbering.bills)}" style="font-family:Consolas"></div>
+        </div>
+        <div class="fg2">
+          <div class="fg"><label class="fl">Payments</label><input class="fi" id="num_payments" value="${esc(numbering.payments)}" style="font-family:Consolas"></div>
+          <div class="fg"><label class="fl">Receipts</label><input class="fi" id="num_receipts" value="${esc(numbering.receipts)}" style="font-family:Consolas"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><div class="ct">Default GL Accounts</div><div class="cs">Which accounts to auto-post common transactions to</div></div>
+      <div class="cb">
+        ${coa.length === 0 ? '<div class="fg" style="background:var(--amber2);padding:10px 14px;border-radius:8px;color:var(--amber);font-size:12px">⚠ Set up your Chart of Accounts first — then come back here to pick defaults from the dropdowns.</div>' : ''}
+        <div class="fg2">
+          <div class="fg"><label class="fl">Cash account</label>${accSelect('cash', def.cash)}</div>
+          <div class="fg"><label class="fl">Bank account</label>${accSelect('bank', def.bank)}</div>
+        </div>
+        <div class="fg2">
+          <div class="fg"><label class="fl">Accounts Receivable</label>${accSelect('ar', def.ar)}</div>
+          <div class="fg"><label class="fl">Accounts Payable</label>${accSelect('ap', def.ap)}</div>
+        </div>
+        <div class="fg2">
+          <div class="fg"><label class="fl">Default Sales account</label>${accSelect('sales', def.sales)}</div>
+          <div class="fg"><label class="fl">Default Cost of Goods Sold</label>${accSelect('cogs', def.cogs)}</div>
+        </div>
+        <div class="fg2">
+          <div class="fg"><label class="fl">Inventory account</label>${accSelect('inventory', def.inventory)}</div>
+          <div class="fg"><label class="fl">GST Payable (output)</label>${accSelect('gstPayable', def.gstPayable)}</div>
+        </div>
+        <div class="fg">
+          <label class="fl">GST Receivable (input/refundable)</label>${accSelect('gstReceivable', def.gstReceivable)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function saveAccountsSettings() {
+  const get = id => document.getElementById(id).value;
+  const data = {
+    fiscalYearStart: get('fyStart'),
+    currentPeriod: get('fyCurrent'),
+    numbering: {
+      journals: get('num_journals'),
+      invoices: get('num_invoices'),
+      quotes: get('num_quotes'),
+      bills: get('num_bills'),
+      payments: get('num_payments'),
+      receipts: get('num_receipts')
+    },
+    defaultAccounts: {
+      cash: get('def_cash'),
+      bank: get('def_bank'),
+      ar: get('def_ar'),
+      ap: get('def_ap'),
+      sales: get('def_sales'),
+      cogs: get('def_cogs'),
+      inventory: get('def_inventory'),
+      gstPayable: get('def_gstPayable'),
+      gstReceivable: get('def_gstReceivable')
+    }
+  };
+  tstore.set('accounts-settings', data);
+  toast('Accounts configuration saved ✓');
   renderSidebar();
 }
 

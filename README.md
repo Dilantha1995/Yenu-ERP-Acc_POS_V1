@@ -197,6 +197,37 @@ The admin dashboard reads tenants from localStorage on your current browser. To 
 
 ---
 
+## 🎟️ Promo Codes (give companies free access)
+
+The signup form has a **"Have a promo code?"** field at the plan-selection step. When a customer enters a valid code, they get free access for the specified duration with no trial countdown.
+
+### Built-in codes (give these to customers)
+
+| Code | Plan | Duration | Use case |
+|---|---|---|---|
+| `YENULAUNCH2026` | Enterprise | 2 years | Launch special — biggest gift |
+| `YENU2026` | Business | 1 year | Standard early-adopter |
+| `YENUBETA` | Business | 1 year | Beta testers |
+| `YENUFRIEND` | Business | 6 months | Friends & family |
+| `YENUDEMO` | Enterprise | Unlimited | Internal demos / testing |
+
+### How to add/change codes
+
+Edit `public/signup.html`. Search for `PROMO_CODES = {` (around line 575). Add new entries:
+
+```javascript
+const PROMO_CODES = {
+  'YOURCODE': { label:'Display name', durationDays:365, plan:'business', description:'What user sees when applied' },
+  // ... add more
+};
+```
+
+Commit and Vercel auto-redeploys.
+
+### Tracking promo customers
+
+Open `/admin` (your admin dashboard) → **🎁 Promo users** filter pill shows all customers who used a promo code. Each row shows which code they used.
+
 ## 📋 What works right now (Path A, no backend)
 
 - ✅ Beautiful YenuERP landing page
