@@ -227,6 +227,45 @@
               '| customers:', (posCustomers||[]).length);
 })();
 </script>
+<script>
+
+// ── YENUERP SSO: auto-login when YenuERP session is active ──
+(function(){
+  if (typeof window === 'undefined' || !window._YENU || !window._YENU.session) return;
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(function(){
+      try {
+        // Find the YenuERP user in POS USERS array
+        var sess = window._YENU.session;
+        var u = (typeof USERS !== 'undefined') ? USERS.find(function(x){ return x.email === sess.email; }) : null;
+        if (!u && typeof USERS !== 'undefined') u = USERS.find(function(x){ return x.id === 'owner'; });
+        if (!u && typeof USERS !== 'undefined' && USERS.length) u = USERS[0];
+        if (!u) return;
+        // Skip login screen
+        var ls = document.getElementById('loginScreen');
+        var ar = document.getElementById('appRoot');
+        if (ls) ls.style.display = 'none';
+        if (ar) ar.style.display = 'block';
+        // Set current user
+        CU = u;
+        var uav = document.getElementById('uav');
+        var unm = document.getElementById('unm');
+        if (uav) { uav.textContent = u.initials; uav.style.background = u.color; }
+        if (unm) unm.textContent = u.name.split(' ')[0];
+        if (typeof PAGE !== 'undefined') PAGE = 'dashboard';
+        if (u.role === 'cashier' && u.store) CURRENT_STORE = u.store;
+        if (typeof logAudit === 'function') logAudit('login', '', 'SSO from YenuERP');
+        if (typeof renderSidebar === 'function') renderSidebar();
+        if (typeof renderRegBar === 'function') renderRegBar();
+        if (typeof renderMain === 'function') renderMain();
+        console.log('[YENU] Auto-logged into POS as', u.name);
+      } catch(e) { console.error('YENU SSO failed:', e); }
+    }, 100);
+  });
+})();
+
+</script>
+
 
 
 

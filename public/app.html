@@ -91,8 +91,8 @@ html,body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color
 <div class="app-shell">
   <div class="topbar">
     <div class="brand">
-      <div class="brand-mark">Y</div>
-      <span>YenuERP</span>
+      <div class="brand-mark" id="brandMark">Y</div>
+      <span id="brandName">YenuERP</span>
     </div>
     <div class="co-pill" id="coPill">—</div>
     <div class="spacer"></div>
@@ -228,6 +228,27 @@ function init(){
   renderTrialBanner();
   renderFirstRunBanner();
   renderModules();
+  loadTenantBranding();
+}
+
+function loadTenantBranding(){
+  if (!session.tenant) return;
+  try {
+    const branding = JSON.parse(localStorage.getItem('tenant:' + session.tenant + ':setup:branding') || 'null');
+    if (branding && branding.logoData) {
+      const bm = document.getElementById('brandMark');
+      if (bm) {
+        bm.style.background = 'transparent';
+        bm.style.padding = '0';
+        bm.innerHTML = '<img src="' + branding.logoData + '" style="width:100%;height:100%;object-fit:contain;border-radius:8px">';
+      }
+    }
+    const co = JSON.parse(localStorage.getItem('tenant:' + session.tenant + ':setup:company') || 'null');
+    if (co && co.name) {
+      const bn = document.getElementById('brandName');
+      if (bn) bn.textContent = co.name;
+    }
+  } catch(e) { console.warn('[YENU] branding load failed', e); }
 }
 
 function renderFirstRunBanner(){

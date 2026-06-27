@@ -15,9 +15,13 @@
 
   const tenant = session.tenant || 'default';
   let tenantData = null;
+  let tenantBranding = null;
+  let tenantLogo = null;
   try {
     const tenants = JSON.parse(localStorage.getItem(TENANTS_KEY) || '{}');
     tenantData = tenants[tenant];
+    tenantBranding = JSON.parse(localStorage.getItem('tenant:' + tenant + ':setup:branding') || 'null');
+    if (tenantBranding && tenantBranding.logoData) tenantLogo = tenantBranding.logoData;
   } catch(e){}
 
   let trialDaysLeft = null;
@@ -94,7 +98,7 @@
       '#erpExpiredBanner{position:fixed;top:0;left:0;right:0;background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:8px 18px;text-align:center;font-size:12px;font-weight:600;z-index:9998;font-family:"Segoe UI",system-ui,sans-serif}' +
       '#erpExpiredBanner a{color:#991b1b;font-weight:800;text-decoration:underline;margin-left:8px}' +
       '</style>' +
-      '<div class="es-co" title="Your company"><div class="es-cobr">Y</div><span>' + esc(session.coName || tenant) + '</span></div>' +
+      '<div class="es-co" title="Your company">' + (tenantLogo ? '<img src="' + tenantLogo + '" style="width:22px;height:22px;border-radius:5px;object-fit:cover;background:#fff">' : '<div class="es-cobr">' + (window._YENU && window._YENU.coCode ? window._YENU.coCode.slice(0,2) : 'Y') + '</div>') + '<span>' + esc(session.coName || tenant) + '</span></div>' +
       '<button class="es-pill" onclick="document.getElementById(\'erpMenu\').classList.toggle(\'on\')">' +
         '<span class="es-av" style="background:' + (session.color||'#1849a9') + '">' + (session.short||'U') + '</span>' +
         '<span>' + esc(session.name||'') + '</span>' +

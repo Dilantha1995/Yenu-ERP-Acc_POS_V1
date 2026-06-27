@@ -592,12 +592,15 @@ function ensureDefaults() {
     const tenants = JSON.parse(localStorage.getItem(TENANTS_KEY) || '{}');
     const tn = tenants[TENANT];
     if (tn) {
+      // Default currency by country
+      const curByCountry = { 'LK':'LKR', 'MV':'MVR', 'IN':'INR', 'OTHER':'USD' };
+      const co = tn.country || 'LK';
       tstore.set('company', {
         name: tn.coName,
         slug: tn.slug,
         industry: tn.industry,
-        country: tn.country || 'MV',
-        currency: tn.currency || 'MVR',
+        country: co,
+        currency: tn.currency || curByCountry[co] || 'LKR',
         size: tn.size,
         fiscalYearStart: '01-01',
         regNumber: '',
@@ -1074,14 +1077,14 @@ function view_company() {
               </select></div>
             <div class="fg"><label class="fl">Country</label>
               <select class="fs" name="country">
+                <option value="LK" ${c.country==='LK'?'selected':''}>🇱🇰 Sri Lanka</option>
                 <option value="MV" ${c.country==='MV'?'selected':''}>🇲🇻 Maldives</option>
                 <option value="IN" ${c.country==='IN'?'selected':''}>🇮🇳 India</option>
-                <option value="LK" ${c.country==='LK'?'selected':''}>🇱🇰 Sri Lanka</option>
                 <option value="OTHER" ${c.country==='OTHER'?'selected':''}>Other</option>
               </select></div>
             <div class="fg"><label class="fl">Base currency</label>
               <select class="fs" name="currency">
-                ${['MVR','USD','EUR','INR','GBP','AED'].map(v=>`<option ${c.currency===v?'selected':''}>${v}</option>`).join('')}
+                ${['LKR','MVR','USD','EUR','INR','GBP','AED','SGD','THB'].map(v=>`<option ${c.currency===v?'selected':''}>${v}</option>`).join('')}
               </select></div>
           </div>
           <div class="fg2">
@@ -1356,9 +1359,19 @@ function filterItems(q) {
     tr.style.display = !q || tr.dataset.search.includes(q) ? '' : 'none';
   });
 }
-function _generateSku(catCode) {
+function _deriveCompanyCode() {
   const co = tstore.get('company') || {};
-  const coCode = (co.code || 'CO').toUpperCase();
+  if (co.code) return co.code.toUpperCase();
+  if (co.name) {
+    // Derive from first letters of company name words
+    const words = co.name.split(/\s+/).filter(w => /^[A-Za-z]/.test(w));
+    if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+    if (words.length === 1) return words[0].slice(0,2).toUpperCase();
+  }
+  return 'CO';
+}
+function _generateSku(catCode) {
+  const coCode = _deriveCompanyCode();
   const counters = tstore.get('skuCounters') || {};
   const next = (counters[catCode] || 0) + 1;
   return coCode + '-' + catCode + '-' + String(next).padStart(3,'0');
@@ -1404,8 +1417,8 @@ function editItem(item) {
               </select>`}
           </div>
           <div class="fg"><label class="fl">SKU / Code <span class="req">*</span></label>
-            <input class="fi" id="itemSku" name="sku" value="${esc(item.sku)}" placeholder="Auto-generated when category picked" required style="font-family:Consolas">
-            <div class="fhelp">Format: <span class="mono">${esc((co.code||'CO').toUpperCase())}-{CAT}-{SERIAL}</span></div>
+            <input class="fi" id="itemSku" name="sku" value="${esc(item.sku)}" placeholder="Auto-generated when category picked" required autocomplete="off" style="font-family:Consolas">
+            <div class="fhelp">Format: <span class="mono">${esc(_deriveCompanyCode())}-{CAT}-{SERIAL}</span> <a href="#" onclick="event.preventDefault();autoFillSku()" style="color:var(--blue);font-weight:700;margin-left:8px">↻ Generate now</a></div>
           </div>
         </div>
         <div class="fg"><label class="fl">Product name <span class="req">*</span></label><input class="fi" name="name" value="${esc(item.name)}" required></div>
@@ -1433,6 +1446,10 @@ function editItem(item) {
       <button class="btn btn-p" onclick="document.getElementById('itForm').requestSubmit()">${isNew?'Add product':'Save'}</button>
     </div>
   `, true);
+  // Auto-trigger SKU generation for new items
+  if (isNew && cats.length > 0) {
+    setTimeout(function(){ try { autoFillSku(); } catch(e){} }, 50);
+  }
 }
 function saveItem(isNew, id) {
   const f = document.getElementById('itForm');

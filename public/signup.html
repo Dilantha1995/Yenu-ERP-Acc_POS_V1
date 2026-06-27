@@ -345,19 +345,21 @@ html,body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color
           </div>
         </div>
 
-        <!-- Promo Code -->
-        <details style="margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:0">
-          <summary style="cursor:pointer;font-size:12.5px;color:var(--blue);font-weight:700;padding:11px 14px;list-style:none;display:flex;align-items:center;gap:6px;user-select:none">
-            <span style="font-size:14px">🎟️</span> Have a promo code? Click to enter
-          </summary>
-          <div style="padding:0 14px 14px;border-top:1px solid var(--border)">
-            <div style="display:flex;gap:8px;margin-top:12px">
-              <input class="fi" id="promoCodeInput" placeholder="Enter promo code" style="text-transform:uppercase;font-family:Consolas;letter-spacing:.05em;flex:1" autocomplete="off">
-              <button type="button" class="btn-p" onclick="applyPromoCode()" style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Apply</button>
+        <!-- Promo Code (always visible) -->
+        <div style="margin-bottom:16px;background:linear-gradient(135deg,#fffbeb,#fef3c7);border:2px solid #fcd34d;border-radius:10px;padding:14px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="font-size:18px">🎟️</span>
+            <div>
+              <div style="font-size:13px;font-weight:800;color:#92400e">Have a promo code?</div>
+              <div style="font-size:11px;color:#92400e">Get FREE access — enter your code below</div>
             </div>
-            <div id="promoStatus" style="margin-top:10px;font-size:12px;display:none"></div>
           </div>
-        </details>
+          <div style="display:flex;gap:8px">
+            <input class="fi" id="promoCodeInput" placeholder="e.g. YENULIFETIME" style="text-transform:uppercase;font-family:Consolas;letter-spacing:.05em;flex:1;background:#fff" autocomplete="off">
+            <button type="button" onclick="applyPromoCode()" style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Apply</button>
+          </div>
+          <div id="promoStatus" style="margin-top:10px;font-size:12px;display:none"></div>
+        </div>
 
         <button class="btn btn-p" id="finishBtn" onclick="finishSignup()">
           <span class="spinner"></span>
@@ -510,7 +512,9 @@ function saveTenants(t){
 // ─── PROMO CODES ───────────────────────────────────────────────
 // These give companies free access. Edit this list to add/remove codes.
 const PROMO_CODES = {
+  'YENULIFETIME':   { label:'Lifetime Access',      durationDays:36500, plan:'enterprise', description:'🌟 LIFETIME FREE on Enterprise plan (100 years)' },
   'YENULAUNCH2026': { label:'Launch Special',       durationDays:730,   plan:'enterprise', description:'🎉 2 YEARS FREE on Enterprise plan' },
+  'YENUOWNER':      { label:'Owner Companies',      durationDays:36500, plan:'enterprise', description:'🏢 LIFETIME — for your own companies' },
   'YENUBETA':       { label:'Beta Tester',          durationDays:365,   plan:'business',   description:'1 year FREE on Business plan' },
   'YENUFRIEND':     { label:'Friends & Family',     durationDays:180,   plan:'business',   description:'6 months FREE on Business plan' },
   'YENUDEMO':       { label:'Demo Mode',            durationDays:99999, plan:'enterprise', description:'Unlimited test access (admin demo)' },
