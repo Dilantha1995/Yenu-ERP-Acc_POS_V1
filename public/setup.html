@@ -269,7 +269,9 @@ const NAV = [
   ]},
   { sec: 'Master Data', items: [
     { key: 'coa',       label: 'Chart of Accounts',ic: '📒' },
+    { key: 'categories',label: 'Product Categories',ic: '🏷️' },
     { key: 'items',     label: 'Products / Items', ic: '📦' },
+    { key: 'labels',    label: 'Print Labels',     ic: '🖨️' },
     { key: 'customers', label: 'Customers',        ic: '👥' },
     { key: 'vendors',   label: 'Vendors',          ic: '🚚' }
   ]},
@@ -610,6 +612,308 @@ function ensureDefaults() {
   if (!tstore.get('tax')) {
     tstore.set('tax', { gstEnabled: false, gstRate: 8, tgstRate: 12, bptEnabled: false, bptRate: 15 });
   }
+  if (!tstore.get('categories')) tstore.set('categories', []);
+  if (!tstore.get('skuCounters')) tstore.set('skuCounters', {});
+}
+
+/* ── CATEGORIES VIEW ── */
+function view_categories() {
+  const cats = tstore.get('categories') || [];
+  document.getElementById('main').innerHTML = `
+    <div class="ph">
+      <div><div class="pt">🏷️ Product Categories</div><div class="ps">${cats.length} categor${cats.length===1?'y':'ies'} · used to auto-generate product SKUs</div></div>
+      <div class="brow"><button class="btn btn-p" onclick="editCategory()">＋ Add category</button></div>
+    </div>
+    ${cats.length === 0 ? `
+      <div class="card"><div class="cb"><div class="empty">
+        <div class="empty-ic">🏷️</div><div class="empty-tt">No categories yet</div>
+        <div class="empty-sb">Categories help organise products and auto-generate SKUs like <span class="mono">${esc((tstore.get('company')||{}).code||'CO')}-CC-001</span></div>
+        <button class="btn btn-p" onclick="editCategory()">＋ Add your first category</button>
+        <div style="margin-top:14px"><button class="btn" onclick="loadDefaultCategories()">📦 Load common categories</button></div>
+      </div></div></div>
+    ` : `
+      <div class="card">
+        <div class="ch"><div class="ct">Categories</div></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Code</th><th>Name</th><th>Icon</th><th>Products</th><th>Next SKU</th><th></th></tr></thead>
+            <tbody>
+              ${cats.map(c => {
+                const items = (tstore.get('items')||[]).filter(it => it.categoryCode === c.code);
+                const counters = tstore.get('skuCounters') || {};
+                const next = (counters[c.code] || 0) + 1;
+                const coCode = (tstore.get('company')||{}).code || 'CO';
+                return `<tr>
+                  <td><span class="mono">${esc(c.code)}</span></td>
+                  <td><b>${esc(c.name)}</b></td>
+                  <td style="font-size:18px">${esc(c.icon||'📦')}</td>
+                  <td>${items.length}</td>
+                  <td><span class="mono" style="color:var(--blue)">${coCode}-${c.code}-${String(next).padStart(3,'0')}</span></td>
+                  <td class="row-actions">
+                    <button class="btn btn-xs" onclick='editCategory(${JSON.stringify(c)})'>Edit</button>
+                    <button class="btn btn-xs" onclick='deleteCategory("${esc(c.code)}")' style="color:var(--red)">×</button>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `}
+  `;
+}
+function editCategory(c) {
+  const isNew = !c;
+  c = c || { code:'', name:'', icon:'📦', color:'#1849a9', active:true };
+  showModal(`
+    <div class="m-head"><div><div class="m-tt">${isNew?'New':'Edit'} Category</div></div><button class="m-close" onclick="closeModal()">×</button></div>
+    <div class="m-body">
+      <form id="catForm" onsubmit="event.preventDefault();saveCategory(${isNew},'${esc(c.code)}')">
+        <div class="fg2">
+          <div class="fg"><label class="fl">Code <span class="req">*</span></label>
+            <input class="fi" name="code" value="${esc(c.code)}" required maxlength="4" pattern="[A-Z0-9]+" style="font-family:Consolas;text-transform:uppercase;letter-spacing:.06em;font-weight:700" ${isNew?'':'readonly'}>
+            <div class="fhelp">2–4 letters (CC for Cement, ST for Steel)</div></div>
+          <div class="fg"><label class="fl">Name <span class="req">*</span></label><input class="fi" name="name" value="${esc(c.name)}" required></div>
+        </div>
+        <div class="fg2">
+          <div class="fg"><label class="fl">Icon (emoji)</label><input class="fi" name="icon" value="${esc(c.icon||'📦')}" maxlength="2" style="font-size:18px;text-align:center"></div>
+          <div class="fg"><label class="fl">Color</label><input type="color" name="color" value="${c.color||'#1849a9'}" style="width:60px;height:38px;border:1px solid var(--border);border-radius:8px"></div>
+        </div>
+      </form>
+    </div>
+    <div class="m-foot">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-p" onclick="document.getElementById('catForm').requestSubmit()">${isNew?'Add':'Save'}</button>
+    </div>
+  `);
+}
+function saveCategory(isNew, oldCode) {
+  const f = document.getElementById('catForm');
+  const data = {};
+  for (const el of f.elements) if (el.name) data[el.name] = el.value;
+  data.code = data.code.toUpperCase();
+  const cats = tstore.get('categories') || [];
+  if (isNew) {
+    if (cats.find(c => c.code === data.code)) { toast('Code already used', true); return; }
+    cats.push(data);
+  } else {
+    const idx = cats.findIndex(c => c.code === oldCode);
+    if (idx >= 0) cats[idx] = data;
+  }
+  tstore.set('categories', cats);
+  closeModal(); toast('Category saved ✓');
+  view_categories(); renderSidebar();
+}
+function deleteCategory(code) {
+  if (!confirm('Delete this category? Products using it will keep their SKU.')) return;
+  tstore.set('categories', (tstore.get('categories')||[]).filter(c => c.code !== code));
+  toast('Category deleted'); view_categories(); renderSidebar();
+}
+function loadDefaultCategories() {
+  const co = tstore.get('company') || {};
+  const ind = co.industry;
+  const sets = {
+    retail: [
+      {code:'BEV',name:'Beverages',icon:'🥤',color:'#1849a9',active:true},
+      {code:'SNK',name:'Snacks',icon:'🍪',color:'#c2410c',active:true},
+      {code:'GRO',name:'Groceries',icon:'🛒',color:'#166534',active:true},
+      {code:'HSH',name:'Household',icon:'🏠',color:'#0d6e2d',active:true}
+    ],
+    trading: [
+      {code:'CC', name:'Cements',     icon:'🏗️',color:'#5c6478',active:true},
+      {code:'ST', name:'Steel',       icon:'🔩',color:'#1c2030',active:true},
+      {code:'TM', name:'Timber',      icon:'🪵',color:'#92400e',active:true},
+      {code:'PT', name:'Paints',      icon:'🎨',color:'#7c3aed',active:true},
+      {code:'TL', name:'Tools',       icon:'🔧',color:'#0891b2',active:true}
+    ],
+    restaurant: [
+      {code:'FD',name:'Food Items',icon:'🍽️',color:'#c2410c',active:true},
+      {code:'BV',name:'Beverages',icon:'🥤',color:'#1849a9',active:true},
+      {code:'DS',name:'Desserts',icon:'🧁',color:'#7c3aed',active:true}
+    ],
+    pharma: [
+      {code:'RX', name:'Prescription Drugs',icon:'💊',color:'#1849a9',active:true},
+      {code:'OTC',name:'Over-the-Counter',  icon:'💊',color:'#166534',active:true},
+      {code:'MS', name:'Medical Supplies',  icon:'🩺',color:'#7c3aed',active:true}
+    ]
+  };
+  const defaults = sets[ind] || sets.retail;
+  tstore.set('categories', defaults);
+  toast(`Loaded ${defaults.length} categories ✓`);
+  view_categories(); renderSidebar();
+}
+
+/* ── PRINT LABELS VIEW ── */
+function view_labels() {
+  const items = tstore.get('items') || [];
+  const co = tstore.get('company') || {};
+  if (!window._labelCfg) {
+    window._labelCfg = {
+      paper:'A4', columns:3, rows:8, perItem:1, gap:5,
+      showName:true, showSku:true, showBarcode:true, showQR:false, showPrice:true,
+      selected:{}
+    };
+  }
+  const cfg = window._labelCfg;
+
+  document.getElementById('main').innerHTML = `
+    <div class="ph">
+      <div><div class="pt">🖨️ Print Product Labels</div><div class="ps">Generate label sheets with barcode/QR codes and price tags</div></div>
+      <div class="brow">
+        <button class="btn" onclick="downloadLabelPdf()">⬇ Download PDF</button>
+        <button class="btn btn-p" onclick="printLabels()">🖨️ Print</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 380px;gap:14px">
+      <div class="card">
+        <div class="ch">
+          <div><div class="ct">Pick products to print</div><div class="cs">${items.length} product${items.length===1?'':'s'} available</div></div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm" onclick="selectAllLabels(true)">Select all</button>
+            <button class="btn btn-sm" onclick="selectAllLabels(false)">Clear</button>
+          </div>
+        </div>
+        ${items.length === 0 ? '<div class="empty"><div class="empty-tt">No products yet</div><div class="empty-sb">Add products first, then come back to print labels.</div></div>' : `
+        <div class="tw" style="max-height:500px;overflow-y:auto">
+          <table>
+            <thead><tr><th></th><th>SKU</th><th>Name</th><th>Price</th><th>Qty</th></tr></thead>
+            <tbody>
+              ${items.map(it => `
+                <tr>
+                  <td><input type="checkbox" data-item="${esc(it.id)}" ${cfg.selected[it.id]?'checked':''} onchange="toggleLabel('${esc(it.id)}',this.checked)" style="accent-color:var(--blue);width:18px;height:18px"></td>
+                  <td><span class="mono">${esc(it.sku||'')}</span></td>
+                  <td>${esc(it.name)}</td>
+                  <td class="num">${fmt(it.price)}</td>
+                  <td><input type="number" min="1" max="100" value="${cfg.selected[it.id]||cfg.perItem}" style="width:60px;padding:5px;border:1px solid var(--border);border-radius:5px;text-align:center" onchange="setLabelQty('${esc(it.id)}',this.value)"></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+      </div>
+
+      <div class="card">
+        <div class="ch"><div class="ct">Label settings</div></div>
+        <div class="cb">
+          <div class="fg2">
+            <div class="fg"><label class="fl">Paper size</label>
+              <select class="fs" id="lp_paper" onchange="window._labelCfg.paper=this.value">
+                <option value="A4" ${cfg.paper==='A4'?'selected':''}>A4 (210×297mm)</option>
+                <option value="Letter" ${cfg.paper==='Letter'?'selected':''}>Letter (8.5×11")</option>
+                <option value="A5" ${cfg.paper==='A5'?'selected':''}>A5 (148×210mm)</option>
+              </select></div>
+            <div class="fg"><label class="fl">Gap (mm)</label>
+              <input class="fi" type="number" id="lp_gap" min="0" max="20" value="${cfg.gap}" onchange="window._labelCfg.gap=parseInt(this.value)||5"></div>
+          </div>
+          <div class="fg2">
+            <div class="fg"><label class="fl">Columns</label>
+              <input class="fi" type="number" id="lp_cols" min="1" max="8" value="${cfg.columns}" onchange="window._labelCfg.columns=parseInt(this.value)||3"></div>
+            <div class="fg"><label class="fl">Rows per page</label>
+              <input class="fi" type="number" id="lp_rows" min="1" max="20" value="${cfg.rows}" onchange="window._labelCfg.rows=parseInt(this.value)||8"></div>
+          </div>
+          <div class="fg"><label class="fl">Default labels per item</label>
+            <input class="fi" type="number" id="lp_per" min="1" max="100" value="${cfg.perItem}" onchange="window._labelCfg.perItem=parseInt(this.value)||1"></div>
+
+          <div class="fg" style="background:var(--bg);padding:11px 13px;border-radius:8px">
+            <div class="fl">Show on label:</div>
+            ${[['showName','Product name'],['showSku','SKU code'],['showBarcode','Barcode'],['showQR','QR code'],['showPrice','Price']]
+              .map(([k,l])=>`<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:4px 0;cursor:pointer">
+                <input type="checkbox" id="lp_${k}" ${cfg[k]?'checked':''} onchange="window._labelCfg.${k}=this.checked" style="accent-color:var(--blue)">${l}</label>`).join('')}
+          </div>
+
+          <div style="background:#dcfce7;padding:11px 13px;border-radius:8px;font-size:11.5px;color:var(--green);line-height:1.5;margin-top:10px">
+            ${Object.keys(cfg.selected).filter(k=>cfg.selected[k]).length === 0 ? '⚠ No products selected — pick some from the table' : `📋 ${Object.values(cfg.selected).reduce((s,n)=>s+(parseInt(n)||0),0)} labels across ${Object.keys(cfg.selected).filter(k=>cfg.selected[k]).length} product(s)`}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function toggleLabel(id, checked) {
+  window._labelCfg.selected[id] = checked ? window._labelCfg.perItem : 0;
+  view_labels();
+}
+function setLabelQty(id, q) {
+  window._labelCfg.selected[id] = parseInt(q) || 0;
+}
+function selectAllLabels(yes) {
+  const items = tstore.get('items') || [];
+  items.forEach(it => { window._labelCfg.selected[it.id] = yes ? window._labelCfg.perItem : 0; });
+  view_labels();
+}
+function _buildLabelHTML(forPrint) {
+  const cfg = window._labelCfg;
+  const items = tstore.get('items') || [];
+  const co = tstore.get('company') || {};
+  const tax = tstore.get('tax') || {};
+  const currency = (co.currency==='MVR'?'Rf':co.currency||'Rf');
+  const sel = items.map(it => {
+    const n = parseInt(cfg.selected[it.id]) || 0;
+    return n > 0 ? { item: it, n } : null;
+  }).filter(Boolean);
+  if (sel.length === 0) return null;
+
+  const allLabels = [];
+  sel.forEach(s => { for (let i=0;i<s.n;i++) allLabels.push(s.item); });
+
+  const paperSizes = { A4:'210mm 297mm', Letter:'215.9mm 279.4mm', A5:'148mm 210mm' };
+  const paperWidth = { A4:210, Letter:215.9, A5:148 };
+  const labelW = (paperWidth[cfg.paper] - 20 - (cfg.columns-1)*cfg.gap) / cfg.columns;
+  const pageHeight = { A4:297, Letter:279.4, A5:210 };
+  const labelH = (pageHeight[cfg.paper] - 20 - (cfg.rows-1)*cfg.gap) / cfg.rows;
+
+  const labelHtml = allLabels.map(it => {
+    const barcode = it.barcode || it.sku || it.id;
+    return `<div class="label">
+      ${cfg.showName ? `<div class="lb-name">${esc(it.name)}</div>` : ''}
+      ${cfg.showSku ? `<div class="lb-sku">${esc(it.sku||'')}</div>` : ''}
+      ${cfg.showBarcode ? `<svg class="lb-bar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" preserveAspectRatio="none"><g fill="#000">${(barcode.split('').map((c,i) => `<rect x="${i*8}" y="0" width="${2+(c.charCodeAt(0)%4)}" height="40"/>`).join(''))}</g></svg><div class="lb-barnum">${esc(barcode)}</div>` : ''}
+      ${cfg.showQR ? `<div class="lb-qr">QR: ${esc(it.sku||it.id)}</div>` : ''}
+      ${cfg.showPrice ? `<div class="lb-price">${currency} ${(it.price||0).toFixed(2)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html><head><title>Labels — ${esc(co.name||'')}</title>
+<style>
+@page { size: ${paperSizes[cfg.paper]}; margin: 10mm; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', sans-serif; font-size: 9pt; }
+.sheet { display: grid; grid-template-columns: repeat(${cfg.columns}, 1fr); gap: ${cfg.gap}mm; }
+.label {
+  height: ${labelH}mm; border: 1px dashed #ddd; padding: 3mm;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; page-break-inside: avoid; overflow: hidden;
+}
+.label .lb-name { font-size: 9pt; font-weight: 700; line-height: 1.1; margin-bottom: 1mm; max-height: 12mm; overflow: hidden; }
+.label .lb-sku { font-family: 'Consolas', monospace; font-size: 8pt; color: #555; margin-bottom: 1mm; }
+.label .lb-bar { width: 100%; height: 8mm; margin: 1mm 0; }
+.label .lb-barnum { font-family: 'Consolas', monospace; font-size: 7pt; margin-bottom: 1mm; }
+.label .lb-qr { font-family: 'Consolas', monospace; font-size: 7pt; padding: 1mm 0; }
+.label .lb-price { font-size: 11pt; font-weight: 800; color: #1849a9; margin-top: 1mm; }
+${forPrint ? '@media print { .label { border-color: transparent; } body { -webkit-print-color-adjust: exact; } }' : ''}
+</style></head><body>
+<div class="sheet">${labelHtml}</div>
+</body></html>`;
+}
+function printLabels() {
+  const html = _buildLabelHTML(true);
+  if (!html) { toast('Select products first', true); return; }
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(function(){ try{ w.focus(); w.print(); } catch(e){} }, 500);
+}
+function downloadLabelPdf() {
+  const html = _buildLabelHTML(false);
+  if (!html) { toast('Select products first', true); return; }
+  const co = tstore.get('company') || {};
+  const blob = new Blob([html], {type:'text/html'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `labels-${co.code||'co'}-${new Date().toISOString().slice(0,10)}.html`;
+  a.click();
+  toast('Labels file downloaded — open it and Print to PDF ✓');
 }
 
 init();
@@ -743,7 +1047,10 @@ function view_company() {
                   .map(t=>`<option ${c.legalType===t?'selected':''}>${t}</option>`).join('')}
               </select></div>
           </div>
-          <div class="fg2">
+          <div class="fg3">
+            <div class="fg"><label class="fl">Company code <span class="req">*</span></label>
+              <input class="fi" name="code" value="${esc(c.code||'')}" maxlength="4" placeholder="e.g. LB" style="font-family:Consolas;text-transform:uppercase;letter-spacing:.08em;font-weight:700">
+              <div class="fhelp">2–4 letters, used in product SKUs (LB → LB-CC-001)</div></div>
             <div class="fg"><label class="fl">Business registration number</label>
               <input class="fi" name="regNumber" value="${esc(c.regNumber||'')}" placeholder="e.g. C-1234/2024"></div>
             <div class="fg"><label class="fl">Tax ID / TIN</label>
@@ -1049,9 +1356,33 @@ function filterItems(q) {
     tr.style.display = !q || tr.dataset.search.includes(q) ? '' : 'none';
   });
 }
+function _generateSku(catCode) {
+  const co = tstore.get('company') || {};
+  const coCode = (co.code || 'CO').toUpperCase();
+  const counters = tstore.get('skuCounters') || {};
+  const next = (counters[catCode] || 0) + 1;
+  return coCode + '-' + catCode + '-' + String(next).padStart(3,'0');
+}
+function _bumpSkuCounter(catCode) {
+  const counters = tstore.get('skuCounters') || {};
+  counters[catCode] = (counters[catCode] || 0) + 1;
+  tstore.set('skuCounters', counters);
+}
+function autoFillSku() {
+  const catSelect = document.getElementById('itemCat');
+  const catCode = catSelect ? catSelect.value : '';
+  const skuField = document.getElementById('itemSku');
+  if (catCode && skuField && (!skuField.value || skuField.dataset.auto === '1')) {
+    skuField.value = _generateSku(catCode);
+    skuField.dataset.auto = '1';
+  }
+}
 function editItem(item) {
   const isNew = !item;
-  item = item || { id: uid(), sku:'', name:'', barcode:'', category:'', uom:'pcs', cost:0, price:0, stock:0, taxRate:0, glRev:'4000', glCogs:'5000', glInv:'1300' };
+  const cats = tstore.get('categories') || [];
+  const co = tstore.get('company') || {};
+  const defCat = cats[0]?.code || '';
+  item = item || { id: uid(), sku:'', name:'', barcode:'', category:'', categoryCode:defCat, uom:'pcs', cost:0, price:0, stock:0, taxRate:0, glRev:'4000', glCogs:'5000', glInv:'1300' };
   const coa = tstore.get('coa') || [];
   const revAccs = coa.filter(a => a.type==='rev');
   const cogsAccs = coa.filter(a => a.class==='cogs');
@@ -1065,12 +1396,21 @@ function editItem(item) {
     <div class="m-body">
       <form id="itForm" onsubmit="event.preventDefault();saveItem(${isNew},'${esc(item.id)}')">
         <div class="fg2">
-          <div class="fg"><label class="fl">SKU / Code</label><input class="fi" name="sku" value="${esc(item.sku)}" placeholder="auto if blank"></div>
-          <div class="fg"><label class="fl">Barcode</label><input class="fi" name="barcode" value="${esc(item.barcode)}" placeholder="optional"></div>
+          <div class="fg"><label class="fl">Category <span class="req">*</span></label>
+            ${cats.length === 0 ?
+              '<div style="background:var(--amber2);color:var(--amber);padding:9px 12px;border-radius:7px;font-size:11.5px"><a href="#" onclick="closeModal();goto(\'categories\')" style="color:var(--amber);font-weight:700">⚠ Add a category first →</a></div>' :
+              `<select class="fs" id="itemCat" name="categoryCode" onchange="autoFillSku()" required>
+                ${cats.map(c => `<option value="${esc(c.code)}" ${item.categoryCode===c.code?'selected':''}>${esc(c.code)} — ${esc(c.name)}</option>`).join('')}
+              </select>`}
+          </div>
+          <div class="fg"><label class="fl">SKU / Code <span class="req">*</span></label>
+            <input class="fi" id="itemSku" name="sku" value="${esc(item.sku)}" placeholder="Auto-generated when category picked" required style="font-family:Consolas">
+            <div class="fhelp">Format: <span class="mono">${esc((co.code||'CO').toUpperCase())}-{CAT}-{SERIAL}</span></div>
+          </div>
         </div>
         <div class="fg"><label class="fl">Product name <span class="req">*</span></label><input class="fi" name="name" value="${esc(item.name)}" required></div>
         <div class="fg2">
-          <div class="fg"><label class="fl">Category</label><input class="fi" name="category" value="${esc(item.category)}" placeholder="e.g. Beverages"></div>
+          <div class="fg"><label class="fl">Barcode</label><input class="fi" name="barcode" value="${esc(item.barcode)}" placeholder="optional"></div>
           <div class="fg"><label class="fl">Unit of measure</label><select class="fs" name="uom">${['pcs','box','kg','g','L','ml','m','sq.ft','hour','day'].map(v=>`<option ${item.uom===v?'selected':''}>${v}</option>`).join('')}</select></div>
         </div>
         <div class="fg3">
@@ -1099,6 +1439,15 @@ function saveItem(isNew, id) {
   const data = { id };
   for (const el of f.elements) if (el.name) data[el.name] = ['cost','price','stock','taxRate'].includes(el.name) ? parseFloat(el.value)||0 : el.value;
   if (!data.sku) data.sku = 'SKU-' + Date.now().toString(36).toUpperCase();
+  // Save category name from code for backward compat
+  if (data.categoryCode) {
+    const cat = (tstore.get('categories')||[]).find(c => c.code === data.categoryCode);
+    data.category = cat ? cat.name : data.categoryCode;
+  }
+  // Bump SKU counter if a fresh auto-SKU was generated
+  if (isNew && data.categoryCode && document.getElementById('itemSku') && document.getElementById('itemSku').dataset.auto === '1') {
+    _bumpSkuCounter(data.categoryCode);
+  }
   const items = tstore.get('items') || [];
   if (isNew) items.push(data);
   else {

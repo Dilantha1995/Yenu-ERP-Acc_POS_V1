@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <!-- ═══════════════════════════════════════════════════════════════════
-     YENUERP TENANT ADAPTER (v2)  — auto-injected, exposes window._YENU
+     YENUERP TENANT ADAPTER (v3)  — full master-data integration
      ═══════════════════════════════════════════════════════════════════ -->
 <script>
 (function(){
@@ -11,22 +11,23 @@
   const sess = _yget('psms_session');
   if (!sess || !sess.tenant){ window._YENU = null; return; }
   const PREFIX = 'tenant:' + sess.tenant + ':setup:';
-  const company   = _yget(PREFIX + 'company');
-  const coa       = _yget(PREFIX + 'coa') || [];
-  const customers = _yget(PREFIX + 'customers') || [];
-  const vendors   = _yget(PREFIX + 'vendors') || [];
-  const items     = _yget(PREFIX + 'items') || [];
-  const tax       = _yget(PREFIX + 'tax');
-  const branding  = _yget(PREFIX + 'branding');
-  const users     = _yget(PREFIX + 'users') || [];
-  const posSet    = _yget(PREFIX + 'pos-settings') || {};
-  const accSet    = _yget(PREFIX + 'accounts-settings') || {};
+  const company    = _yget(PREFIX + 'company');
+  const coa        = _yget(PREFIX + 'coa') || [];
+  const customers  = _yget(PREFIX + 'customers') || [];
+  const vendors    = _yget(PREFIX + 'vendors') || [];
+  const items      = _yget(PREFIX + 'items') || [];
+  const categories = _yget(PREFIX + 'categories') || [];
+  const tax        = _yget(PREFIX + 'tax');
+  const branding   = _yget(PREFIX + 'branding');
+  const users      = _yget(PREFIX + 'users') || [];
+  const posSet     = _yget(PREFIX + 'pos-settings') || {};
+  const accSet     = _yget(PREFIX + 'accounts-settings') || {};
 
   const typeMap = { ast:'ASSET', lia:'LIABILITY', eq:'EQUITY', rev:'REVENUE', exp:'EXPENSE' };
   const pad = (n,w) => String(n).padStart(w,'0');
   const slugId = (sess.tenant || 'TNT').toUpperCase().replace(/-/g,'').slice(0,6);
+  const coCode = (company && company.code) || (company && company.name ? company.name.split(' ').filter(w=>w[0]&&w[0].match(/[A-Za-z]/)).slice(0,2).map(w=>w[0]).join('').toUpperCase() : 'YE');
 
-  // Normalise users to ensure modules object exists
   function _norm(u) {
     if (!u.modules) {
       const old = u.access || [];
@@ -44,19 +45,70 @@
   }
   const normUsers = users.map(_norm);
 
+  // ── Map setup categories to POS category format ──
+  const posCategories = categories.length > 0 ? categories.map((c, i) => ({
+    id: c.id || ('C' + pad(i+1, 2)),
+    code: (c.code || '').toUpperCase(),
+    name: c.name,
+    icon: c.icon || '📦',
+    color: c.color || '#1849a9',
+    active: c.active !== false
+  })) : null;
+
+  // ── Map setup items to POS product format (LIVE INTEGRATION) ──
+  const posProducts = items.length > 0 ? items.map((it, i) => {
+    const cat = posCategories ? (posCategories.find(c => c.code === (it.categoryCode||'') || c.name === it.category) || posCategories[0]) : null;
+    return {
+      id: it.id || ('P' + pad(i+1, 4)),
+      sku: it.sku || ('SKU-' + pad(i+1, 4)),
+      barcode: it.barcode || '',
+      name: it.name,
+      cat: cat ? cat.id : (it.category || 'C01'),
+      supplier: it.supplier || '',
+      cost: it.cost || 0,
+      price: it.price || 0,
+      taxRate: it.taxRate || (tax && tax.gstRate) || 0,
+      unit: it.uom || 'pcs',
+      img: it.icon || '📦',
+      track: true,
+      lowStock: it.lowStock || 5,
+      active: it.active !== false,
+      stock: it.stock || 0
+    };
+  }) : null;
+
+  // ── Map setup customers to POS customer format ──
+  const posCustomers = customers.length > 0 ? customers.map((c, i) => ({
+    id: c.id || ('C' + pad(i+1, 3)),
+    code: 'CUST-' + pad(i+1, 4),
+    name: c.name,
+    phone: c.phone || '',
+    email: c.email || '',
+    tier: c.segment === 'b2b' ? 'corporate' : (c.segment === 'gov' ? 'corporate' : 'guest'),
+    points: 0,
+    creditLimit: c.creditLimit || 0,
+    balance: 0,
+    joined: new Date().toISOString().slice(0,10),
+    active: true,
+    address: c.address || '',
+    taxId: c.tin || ''
+  })) : null;
+
   window._YENU = {
     session: sess,
     tenant: sess.tenant,
     coName: (company && company.name) || sess.coName || sess.tenant,
+    coCode: coCode,
     hasSetup: !!(company && company.name),
     coaConfigured: coa.length > 0,
     itemsConfigured: items.length > 0,
     customersConfigured: customers.length > 0,
     vendorsConfigured: vendors.length > 0,
+    isOwner: sess.role === 'owner',
+    isAdmin: sess.role === 'owner' || sess.role === 'admin',
 
     company: company ? {
-      id: slugId,
-      name: company.name,
+      id: slugId, name: company.name,
       currency: company.currency || 'MVR',
       country: company.country || 'MV',
       taxRegime: (company.country === 'MV' || !company.country) ? 'MIRA-BPT-GST' : 'OTHER',
@@ -66,27 +118,24 @@
     coa: coa.length > 0 ? coa.map(a => ({
       code: a.code, name: a.name,
       type: typeMap[a.type] || 'ASSET',
-      parent: null, isGroup: false,
-      normal: a.normal
+      parent: null, isGroup: false, normal: a.normal
     })) : null,
 
+    // Generic format (used by AccountsCore)
     customers: customers.length > 0 ? customers.map((c, i) => ({
       id: c.id || 'C' + pad(i+1, 3),
       code: 'CUS-' + pad(i+1, 3),
       name: c.name,
       currency: c.currency || 'MVR',
       creditLimit: c.creditLimit || 0,
-      terms: 30,
-      taxId: c.tin || '-'
+      terms: 30, taxId: c.tin || '-'
     })) : null,
 
     vendors: vendors.length > 0 ? vendors.map((v, i) => ({
       id: v.id || 'V' + pad(i+1, 3),
       code: 'VND-' + pad(i+1, 3),
-      name: v.name,
-      currency: v.currency || 'MVR',
-      terms: 30,
-      taxId: v.tin || '-'
+      name: v.name, currency: v.currency || 'MVR',
+      terms: 30, taxId: v.tin || '-'
     })) : null,
 
     items: items.length > 0 ? items.map((it, i) => ({
@@ -97,22 +146,22 @@
       uom: it.uom || 'PCS',
       costAvg: it.cost || 0,
       sellPrice: it.price || 0,
-      stock: it.stock || 0,
-      reorderLvl: 0,
+      stock: it.stock || 0, reorderLvl: 0,
       glRev: it.glRev || (accSet.defaultAccounts && accSet.defaultAccounts.sales) || '4000',
       glCogs: it.glCogs || (accSet.defaultAccounts && accSet.defaultAccounts.cogs) || '5000',
       glInv: it.glInv || (accSet.defaultAccounts && accSet.defaultAccounts.inventory) || '1300'
     })) : null,
 
-    // POS-specific company config
+    // POS-shaped data (live integration with RetailFlow POS)
+    posProducts: posProducts,
+    posCustomers: posCustomers,
+    posCategories: posCategories,
+
     posCompany: company ? {
       name: company.name,
-      address: company.address || '',
-      phone: company.phone || '',
-      email: company.email || '',
-      website: company.website || '',
-      registrationNo: company.regNumber || '',
-      tinNumber: company.tin || '',
+      address: company.address || '', phone: company.phone || '',
+      email: company.email || '', website: company.website || '',
+      registrationNo: company.regNumber || '', tinNumber: company.tin || '',
       receiptFooter: (posSet.receipt && posSet.receipt.footerMessage) || (branding && branding.invoiceFooter) || 'Thank you for shopping with us!',
       receiptHeaderMessage: (posSet.receipt && posSet.receipt.headerMessage) || '',
       logo: '🏢',
@@ -126,43 +175,29 @@
       receiptShowPoweredBy:(posSet.receipt && posSet.receipt.showPoweredBy)!== false,
       currency: company.currency || 'MVR',
       currencySymbol: company.currency === 'MVR' ? 'Rf' : (company.currency || 'Rf'),
-      gstRate: (tax && tax.gstRate) || 8,
-      gstEnabled: !!(tax && tax.gstEnabled)
+      gstRate: (tax && tax.gstRate) || 8, gstEnabled: !!(tax && tax.gstEnabled)
     } : null,
 
-    // POS users — owner + invited team members with POS access
     posUsers: (function(){
       const arr = [];
-      // Owner always has full POS access
       arr.push({
-        id: 'owner',
-        name: sess.name,
+        id: 'owner', name: sess.name,
         initials: sess.short || (sess.name||'U').split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
-        role: 'admin',
-        email: sess.email,
-        pin: '0000',
-        store: null,
-        color: sess.color || '#0d2d6e',
-        active: true,
+        role: 'admin', email: sess.email, pin: '0000',
+        store: null, color: sess.color || '#0d2d6e', active: true,
         canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
       });
-      // Invited users with POS access
       normUsers.filter(u => u.modules.pos && u.modules.pos.access && u.active !== false).forEach((u, i) => {
         const p = u.modules.pos;
         arr.push({
           id: (u.email || 'u'+i).split('@')[0],
           name: u.name,
           initials: u.short || u.name.split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
-          role: p.role || 'cashier',
-          email: u.email,
-          pin: u.pin || '1234',
-          store: p.defaultStore || 'MAIN',
-          color: u.color || '#1849a9',
+          role: p.role || 'cashier', email: u.email, pin: u.pin || '1234',
+          store: p.defaultStore || 'MAIN', color: u.color || '#1849a9',
           active: u.active !== false,
-          canVoid: p.canVoid || false,
-          canDiscount: p.canDiscount !== false,
-          maxDiscountPct: p.maxDiscountPct || 10,
-          canRefund: p.canRefund || false
+          canVoid: p.canVoid || false, canDiscount: p.canDiscount !== false,
+          maxDiscountPct: p.maxDiscountPct || 10, canRefund: p.canRefund || false
         });
       });
       return arr;
@@ -178,25 +213,22 @@
     ]).filter(p => p.enabled),
 
     accountsSettings: accSet,
-    tax: tax,
-    branding: branding,
+    tax: tax, branding: branding,
 
-    // Current logged-in user's per-module permissions
-    currentUserPerms: (function(){
-      // Owner has everything
-      return {
-        accounts: { access:true, role:'admin', canPost:true, canApprove:true, canClose:true },
-        pos:      { access:true, role:'admin', canVoid:true, canDiscount:true, maxDiscountPct:100, canRefund:true },
-        setup:    { access:true, role:'admin' }
-      };
-    })()
+    currentUserPerms: {
+      accounts: { access:true, role:'admin', canPost:true, canApprove:true, canClose:true },
+      pos:      { access:true, role:'admin', canVoid:true, canDiscount:true, maxDiscountPct:100, canRefund:true },
+      setup:    { access:true, role:'admin' }
+    }
   };
-  console.log('[YENU] Tenant adapter v2 loaded:', window._YENU.coName,
-              '| configured:', window._YENU.hasSetup,
-              '| posUsers:', window._YENU.posUsers.length,
-              '| stores:', window._YENU.posStores.length);
+  console.log('[YENU] v3 Tenant adapter:', window._YENU.coName,
+              '| products:', (posProducts||[]).length,
+              '| categories:', (posCategories||[]).length,
+              '| customers:', (posCustomers||[]).length);
 })();
 </script>
+
+
 
 
 
@@ -715,7 +747,7 @@ let USERS = (window._YENU && window._YENU.posUsers && window._YENU.posUsers.leng
   : _DEMO_USERS;
 
 // ── CATEGORIES ──
-let CATEGORIES = [
+const _DEMO_CATEGORIES = [
   { id:'C01', name:'Beverages',        icon:'🥤', color:'#1849a9', active:true },
   { id:'C02', name:'Snacks',           icon:'🍪', color:'#c2410c', active:true },
   { id:'C03', name:'Groceries',        icon:'🛒', color:'#166534', active:true },
@@ -725,10 +757,11 @@ let CATEGORIES = [
   { id:'C07', name:'Household',        icon:'🏠', color:'#0d6e2d', active:true },
   { id:'C08', name:'Frozen Foods',     icon:'🧊', color:'#1e6fa0', active:true },
 ];
+let CATEGORIES = (window._YENU && window._YENU.posCategories && window._YENU.posCategories.length > 0) ? window._YENU.posCategories : _DEMO_CATEGORIES;
 
 // ── SUPPLIERS ──
 // ── VENDORS / SUPPLIERS (full vendor master with TIN, payment terms, etc.) ──
-let SUPPLIERS = [
+const _DEMO_SUPPLIERS = [
   { id:'S001', code:'V-0001', name:'STO Maldives',            tin:'GST-MV-50001', contactPerson:'Ahmed Saleem', contact:'procurement@sto.mv',    phone:'+960-333-0000', altPhone:'',          address:'Boduthakurufaanu Magu, Male\'',         country:'Maldives',  ccy:'MVR', balance:0,      paymentTerms:'Net 30',  creditLimit:500000, glCode:'2100', bankName:'BML',     bankAccount:'7730-12345-001', active:true,  notes:'Primary supplier for general goods', joined:addDays(-365), category:'wholesaler' },
   { id:'S002', code:'V-0002', name:'Dhiraagu Distribution',   tin:'GST-MV-50002', contactPerson:'Hassan Wajeeh',  contact:'sales@dhi.mv',           phone:'+960-330-1000', altPhone:'',          address:'Dhiraagu HQ, Male\'',                     country:'Maldives',  ccy:'MVR', balance:42500,  paymentTerms:'Net 15',  creditLimit:200000, glCode:'2100', bankName:'BML',     bankAccount:'7730-22345-002', active:true,  notes:'',                                  joined:addDays(-300), category:'wholesaler' },
   { id:'S003', code:'V-0003', name:'Coca-Cola Maldives',      tin:'GST-MV-50003', contactPerson:'Ibrahim Faruq',  contact:'orders@cocacola.mv',     phone:'+960-330-2000', altPhone:'+960-770-2000', address:'Hulhumale\' Industrial Zone',          country:'Maldives',  ccy:'MVR', balance:18200,  paymentTerms:'Net 30',  creditLimit:300000, glCode:'2100', bankName:'MIB',     bankAccount:'9001-12345-003', active:true,  notes:'Beverages exclusive distributor',   joined:addDays(-280), category:'distributor' },
@@ -736,9 +769,21 @@ let SUPPLIERS = [
   { id:'S005', code:'V-0005', name:'P&G India Exports',       tin:'',             contactPerson:'Rajesh Kumar',   contact:'export@pg.in',           phone:'+91-22-1000000',altPhone:'',          address:'Mumbai, India',                            country:'India',     ccy:'USD', balance:0,      paymentTerms:'Advance',  creditLimit:0,    glCode:'2110', bankName:'HSBC',    bankAccount:'IN001-12345',     active:true,  notes:'Pre-payment required',              joined:addDays(-180), category:'manufacturer' },
   { id:'S006', code:'V-0006', name:'Nestle Maldives Ltd',     tin:'GST-MV-50006', contactPerson:'Aishath Shahudha', contact:'orders@nestle.mv',     phone:'+960-330-3000', altPhone:'',          address:'Industrial Area, Male\'',                 country:'Maldives',  ccy:'MVR', balance:31200,  paymentTerms:'Net 45',  creditLimit:400000, glCode:'2100', bankName:'BML',     bankAccount:'7730-32345-006', active:true,  notes:'',                                  joined:addDays(-150), category:'distributor' },
 ];
+let SUPPLIERS = (function(){
+  if (window._YENU && window._YENU.vendors && window._YENU.vendors.length > 0) {
+    return window._YENU.vendors.map((v, i) => ({
+      id: v.id, code: 'V-' + String(i+1).padStart(4,'0'), name: v.name,
+      tin: v.taxId || '', contactPerson:'', contact: v.email || '', phone: v.phone || '',
+      altPhone:'', address: v.address || '', country: (window._YENU.company && window._YENU.company.country) || 'MV',
+      ccy: v.currency || 'MVR', balance:0, paymentTerms:'Net 30', creditLimit:0,
+      glCode:'2000', bankName:'', bankAccount:'', active:true, notes:'', joined: new Date().toISOString().slice(0,10), category:'wholesaler'
+    }));
+  }
+  return (window._YENU && window._YENU.hasSetup) ? [] : _DEMO_SUPPLIERS;
+})();
 
 // ── PRODUCTS (with multi-currency pricing optional, multi-store stock) ──
-let PRODUCTS = [
+const _DEMO_PRODUCTS = [
   // Beverages
   { id:'P0001', sku:'BEV-CC-330',  barcode:'8901001000011', name:'Coca-Cola 330ml Can',      cat:'C01', supplier:'S003', cost:8.50,  price:15.00, taxRate:8, unit:'pcs', img:'🥤', track:true, lowStock:30, active:true },
   { id:'P0002', sku:'BEV-CC-1.5',  barcode:'8901001000028', name:'Coca-Cola 1.5L Bottle',    cat:'C01', supplier:'S003', cost:32.00, price:55.00, taxRate:8, unit:'pcs', img:'🥤', track:true, lowStock:15, active:true },
@@ -773,6 +818,7 @@ let PRODUCTS = [
   // Frozen
   { id:'P0025', sku:'FRZ-ICE-1L',  name:'Vanilla Ice Cream 1L',     barcode:'8901001000257', cat:'C08', supplier:'S006', cost:75.00, price:135.00,taxRate:8, unit:'pcs', img:'🍦', track:true, lowStock:8,  active:true },
 ];
+let PRODUCTS = (window._YENU && window._YENU.posProducts && window._YENU.posProducts.length > 0) ? window._YENU.posProducts : (window._YENU && window._YENU.hasSetup ? [] : _DEMO_PRODUCTS);
 
 // ── STOCK (per store, per product) ──
 let STOCK = {};
@@ -793,7 +839,7 @@ function initStock(){
 initStock();
 
 // ── CUSTOMERS (loyalty + accounts) ──
-let CUSTOMERS = [
+const _DEMO_CUSTOMERS_POS = [
   { id:'C001', code:'CUST-0001', name:'Walk-in Customer',  phone:'',              email:'',                   tier:'guest',   points:0,    creditLimit:0,    balance:0,  joined:'2024-01-01', active:true },
   { id:'C002', code:'CUST-0002', name:'Aminath Shaheeda',  phone:'+960-7771122', email:'shaheeda@gmail.com', tier:'gold',    points:1240, creditLimit:5000, balance:0,  joined:'2024-03-15', active:true },
   { id:'C003', code:'CUST-0003', name:'Hassan Manik',      phone:'+960-7782233', email:'manik@gmail.com',    tier:'silver',  points:680,  creditLimit:2000, balance:850,joined:'2024-05-20', active:true },
@@ -801,14 +847,23 @@ let CUSTOMERS = [
   { id:'C005', code:'CUST-0005', name:'Mariyam Faseeha',   phone:'+960-7793344', email:'faseeha@gmail.com',  tier:'platinum',points:3850, creditLimit:10000,balance:0,  joined:'2023-11-05', active:true },
   { id:'C006', code:'CUST-0006', name:'Beach Resort Ltd',  phone:'+960-3345566', email:'procurement@br.mv',  tier:'corporate',points:0,   creditLimit:100000,balance:42000,joined:'2023-08-15',active:true },
 ];
+let CUSTOMERS = (function(){
+  if (window._YENU && window._YENU.hasSetup) {
+    const walkIn = { id:'C001', code:'WALK-IN', name:'Walk-in Customer', phone:'', email:'', tier:'guest', points:0, creditLimit:0, balance:0, joined:'2024-01-01', active:true };
+    const extras = (window._YENU.posCustomers || []).map(c => Object.assign({}, c, { code: c.code || ('CUST-' + c.id) }));
+    return [walkIn].concat(extras);
+  }
+  return _DEMO_CUSTOMERS_POS;
+})();
 
 // ── DISCOUNTS / PROMOTIONS ──
-let DISCOUNTS = [
+const _DEMO_DISCOUNTS = [
   { id:'D001', code:'WEEKEND10',   name:'Weekend 10% Off',           type:'percent', value:10,  scope:'all',      minAmount:100, maxDiscount:0,    validFrom:'2026-01-01', validTo:'2026-12-31', active:true,  used:24 },
   { id:'D002', code:'NEWCUST50',   name:'New Customer MVR 50',       type:'fixed',   value:50,  scope:'all',      minAmount:200, maxDiscount:0,    validFrom:'2026-01-01', validTo:'2026-06-30', active:true,  used:8 },
   { id:'D003', code:'BEV15',       name:'Beverages 15% Off',         type:'percent', value:15,  scope:'category', categoryId:'C01', minAmount:0, maxDiscount:100, validFrom:'2026-01-01', validTo:'2026-03-31', active:true, used:12 },
   { id:'D004', code:'GOLDMEMBER',  name:'Gold Member 5% Off',        type:'percent', value:5,   scope:'tier',     tier:'gold',  minAmount:0,  maxDiscount:0,    validFrom:'2026-01-01', validTo:'2026-12-31', active:true, used:45 },
 ];
+let DISCOUNTS = (window._YENU && window._YENU.hasSetup) ? [] : _DEMO_DISCOUNTS;
 
 // ── TAX CONFIG ──
 let TAX_CONFIG = {
@@ -8172,6 +8227,23 @@ document.addEventListener('keypress', (e)=>{
     if(document.activeElement === el('loginPass') || document.activeElement === el('loginEmail')) doLogin();
   }
 });
+
+
+// ── YENU: Admin-only reset of test transactions ──
+function yenuResetTestData() {
+  if (!window._YENU || !window._YENU.isAdmin) { alert('Only admin can reset test data'); return; }
+  if (!confirm('⚠ This will DELETE all sales, returns, drawer adjustments, and reset registers to closed.\n\nMaster data (products, customers, categories) will NOT be touched.\n\nContinue?')) return;
+  if (!confirm('Are you absolutely sure? This cannot be undone.')) return;
+  SALES = [];
+  if (typeof RETURNS !== 'undefined') RETURNS = [];
+  if (typeof DRAWER_ADJUSTMENTS !== 'undefined') DRAWER_ADJUSTMENTS = [];
+  if (typeof PARKED_SALES !== 'undefined') PARKED_SALES = [];
+  REGISTERS.forEach(r => { r.status = 'closed'; r.openedAt = null; r.openingFloat = 0; });
+  SALE_SEQ = { MAIN:0, HULH:0, ADDU:0, MAA:0 };
+  try { localStorage.setItem('pos_state','{}'); } catch(e){}
+  alert('✓ Test data cleared. Refresh the page.');
+  location.reload();
+}
 
 </script>
 </body>

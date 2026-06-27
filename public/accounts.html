@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <!-- ═══════════════════════════════════════════════════════════════════
-     YENUERP TENANT ADAPTER (v2)  — auto-injected, exposes window._YENU
+     YENUERP TENANT ADAPTER (v3)  — full master-data integration
      ═══════════════════════════════════════════════════════════════════ -->
 <script>
 (function(){
@@ -11,22 +11,23 @@
   const sess = _yget('psms_session');
   if (!sess || !sess.tenant){ window._YENU = null; return; }
   const PREFIX = 'tenant:' + sess.tenant + ':setup:';
-  const company   = _yget(PREFIX + 'company');
-  const coa       = _yget(PREFIX + 'coa') || [];
-  const customers = _yget(PREFIX + 'customers') || [];
-  const vendors   = _yget(PREFIX + 'vendors') || [];
-  const items     = _yget(PREFIX + 'items') || [];
-  const tax       = _yget(PREFIX + 'tax');
-  const branding  = _yget(PREFIX + 'branding');
-  const users     = _yget(PREFIX + 'users') || [];
-  const posSet    = _yget(PREFIX + 'pos-settings') || {};
-  const accSet    = _yget(PREFIX + 'accounts-settings') || {};
+  const company    = _yget(PREFIX + 'company');
+  const coa        = _yget(PREFIX + 'coa') || [];
+  const customers  = _yget(PREFIX + 'customers') || [];
+  const vendors    = _yget(PREFIX + 'vendors') || [];
+  const items      = _yget(PREFIX + 'items') || [];
+  const categories = _yget(PREFIX + 'categories') || [];
+  const tax        = _yget(PREFIX + 'tax');
+  const branding   = _yget(PREFIX + 'branding');
+  const users      = _yget(PREFIX + 'users') || [];
+  const posSet     = _yget(PREFIX + 'pos-settings') || {};
+  const accSet     = _yget(PREFIX + 'accounts-settings') || {};
 
   const typeMap = { ast:'ASSET', lia:'LIABILITY', eq:'EQUITY', rev:'REVENUE', exp:'EXPENSE' };
   const pad = (n,w) => String(n).padStart(w,'0');
   const slugId = (sess.tenant || 'TNT').toUpperCase().replace(/-/g,'').slice(0,6);
+  const coCode = (company && company.code) || (company && company.name ? company.name.split(' ').filter(w=>w[0]&&w[0].match(/[A-Za-z]/)).slice(0,2).map(w=>w[0]).join('').toUpperCase() : 'YE');
 
-  // Normalise users to ensure modules object exists
   function _norm(u) {
     if (!u.modules) {
       const old = u.access || [];
@@ -44,19 +45,70 @@
   }
   const normUsers = users.map(_norm);
 
+  // ── Map setup categories to POS category format ──
+  const posCategories = categories.length > 0 ? categories.map((c, i) => ({
+    id: c.id || ('C' + pad(i+1, 2)),
+    code: (c.code || '').toUpperCase(),
+    name: c.name,
+    icon: c.icon || '📦',
+    color: c.color || '#1849a9',
+    active: c.active !== false
+  })) : null;
+
+  // ── Map setup items to POS product format (LIVE INTEGRATION) ──
+  const posProducts = items.length > 0 ? items.map((it, i) => {
+    const cat = posCategories ? (posCategories.find(c => c.code === (it.categoryCode||'') || c.name === it.category) || posCategories[0]) : null;
+    return {
+      id: it.id || ('P' + pad(i+1, 4)),
+      sku: it.sku || ('SKU-' + pad(i+1, 4)),
+      barcode: it.barcode || '',
+      name: it.name,
+      cat: cat ? cat.id : (it.category || 'C01'),
+      supplier: it.supplier || '',
+      cost: it.cost || 0,
+      price: it.price || 0,
+      taxRate: it.taxRate || (tax && tax.gstRate) || 0,
+      unit: it.uom || 'pcs',
+      img: it.icon || '📦',
+      track: true,
+      lowStock: it.lowStock || 5,
+      active: it.active !== false,
+      stock: it.stock || 0
+    };
+  }) : null;
+
+  // ── Map setup customers to POS customer format ──
+  const posCustomers = customers.length > 0 ? customers.map((c, i) => ({
+    id: c.id || ('C' + pad(i+1, 3)),
+    code: 'CUST-' + pad(i+1, 4),
+    name: c.name,
+    phone: c.phone || '',
+    email: c.email || '',
+    tier: c.segment === 'b2b' ? 'corporate' : (c.segment === 'gov' ? 'corporate' : 'guest'),
+    points: 0,
+    creditLimit: c.creditLimit || 0,
+    balance: 0,
+    joined: new Date().toISOString().slice(0,10),
+    active: true,
+    address: c.address || '',
+    taxId: c.tin || ''
+  })) : null;
+
   window._YENU = {
     session: sess,
     tenant: sess.tenant,
     coName: (company && company.name) || sess.coName || sess.tenant,
+    coCode: coCode,
     hasSetup: !!(company && company.name),
     coaConfigured: coa.length > 0,
     itemsConfigured: items.length > 0,
     customersConfigured: customers.length > 0,
     vendorsConfigured: vendors.length > 0,
+    isOwner: sess.role === 'owner',
+    isAdmin: sess.role === 'owner' || sess.role === 'admin',
 
     company: company ? {
-      id: slugId,
-      name: company.name,
+      id: slugId, name: company.name,
       currency: company.currency || 'MVR',
       country: company.country || 'MV',
       taxRegime: (company.country === 'MV' || !company.country) ? 'MIRA-BPT-GST' : 'OTHER',
@@ -66,27 +118,24 @@
     coa: coa.length > 0 ? coa.map(a => ({
       code: a.code, name: a.name,
       type: typeMap[a.type] || 'ASSET',
-      parent: null, isGroup: false,
-      normal: a.normal
+      parent: null, isGroup: false, normal: a.normal
     })) : null,
 
+    // Generic format (used by AccountsCore)
     customers: customers.length > 0 ? customers.map((c, i) => ({
       id: c.id || 'C' + pad(i+1, 3),
       code: 'CUS-' + pad(i+1, 3),
       name: c.name,
       currency: c.currency || 'MVR',
       creditLimit: c.creditLimit || 0,
-      terms: 30,
-      taxId: c.tin || '-'
+      terms: 30, taxId: c.tin || '-'
     })) : null,
 
     vendors: vendors.length > 0 ? vendors.map((v, i) => ({
       id: v.id || 'V' + pad(i+1, 3),
       code: 'VND-' + pad(i+1, 3),
-      name: v.name,
-      currency: v.currency || 'MVR',
-      terms: 30,
-      taxId: v.tin || '-'
+      name: v.name, currency: v.currency || 'MVR',
+      terms: 30, taxId: v.tin || '-'
     })) : null,
 
     items: items.length > 0 ? items.map((it, i) => ({
@@ -97,22 +146,22 @@
       uom: it.uom || 'PCS',
       costAvg: it.cost || 0,
       sellPrice: it.price || 0,
-      stock: it.stock || 0,
-      reorderLvl: 0,
+      stock: it.stock || 0, reorderLvl: 0,
       glRev: it.glRev || (accSet.defaultAccounts && accSet.defaultAccounts.sales) || '4000',
       glCogs: it.glCogs || (accSet.defaultAccounts && accSet.defaultAccounts.cogs) || '5000',
       glInv: it.glInv || (accSet.defaultAccounts && accSet.defaultAccounts.inventory) || '1300'
     })) : null,
 
-    // POS-specific company config
+    // POS-shaped data (live integration with RetailFlow POS)
+    posProducts: posProducts,
+    posCustomers: posCustomers,
+    posCategories: posCategories,
+
     posCompany: company ? {
       name: company.name,
-      address: company.address || '',
-      phone: company.phone || '',
-      email: company.email || '',
-      website: company.website || '',
-      registrationNo: company.regNumber || '',
-      tinNumber: company.tin || '',
+      address: company.address || '', phone: company.phone || '',
+      email: company.email || '', website: company.website || '',
+      registrationNo: company.regNumber || '', tinNumber: company.tin || '',
       receiptFooter: (posSet.receipt && posSet.receipt.footerMessage) || (branding && branding.invoiceFooter) || 'Thank you for shopping with us!',
       receiptHeaderMessage: (posSet.receipt && posSet.receipt.headerMessage) || '',
       logo: '🏢',
@@ -126,43 +175,29 @@
       receiptShowPoweredBy:(posSet.receipt && posSet.receipt.showPoweredBy)!== false,
       currency: company.currency || 'MVR',
       currencySymbol: company.currency === 'MVR' ? 'Rf' : (company.currency || 'Rf'),
-      gstRate: (tax && tax.gstRate) || 8,
-      gstEnabled: !!(tax && tax.gstEnabled)
+      gstRate: (tax && tax.gstRate) || 8, gstEnabled: !!(tax && tax.gstEnabled)
     } : null,
 
-    // POS users — owner + invited team members with POS access
     posUsers: (function(){
       const arr = [];
-      // Owner always has full POS access
       arr.push({
-        id: 'owner',
-        name: sess.name,
+        id: 'owner', name: sess.name,
         initials: sess.short || (sess.name||'U').split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
-        role: 'admin',
-        email: sess.email,
-        pin: '0000',
-        store: null,
-        color: sess.color || '#0d2d6e',
-        active: true,
+        role: 'admin', email: sess.email, pin: '0000',
+        store: null, color: sess.color || '#0d2d6e', active: true,
         canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
       });
-      // Invited users with POS access
       normUsers.filter(u => u.modules.pos && u.modules.pos.access && u.active !== false).forEach((u, i) => {
         const p = u.modules.pos;
         arr.push({
           id: (u.email || 'u'+i).split('@')[0],
           name: u.name,
           initials: u.short || u.name.split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
-          role: p.role || 'cashier',
-          email: u.email,
-          pin: u.pin || '1234',
-          store: p.defaultStore || 'MAIN',
-          color: u.color || '#1849a9',
+          role: p.role || 'cashier', email: u.email, pin: u.pin || '1234',
+          store: p.defaultStore || 'MAIN', color: u.color || '#1849a9',
           active: u.active !== false,
-          canVoid: p.canVoid || false,
-          canDiscount: p.canDiscount !== false,
-          maxDiscountPct: p.maxDiscountPct || 10,
-          canRefund: p.canRefund || false
+          canVoid: p.canVoid || false, canDiscount: p.canDiscount !== false,
+          maxDiscountPct: p.maxDiscountPct || 10, canRefund: p.canRefund || false
         });
       });
       return arr;
@@ -178,25 +213,22 @@
     ]).filter(p => p.enabled),
 
     accountsSettings: accSet,
-    tax: tax,
-    branding: branding,
+    tax: tax, branding: branding,
 
-    // Current logged-in user's per-module permissions
-    currentUserPerms: (function(){
-      // Owner has everything
-      return {
-        accounts: { access:true, role:'admin', canPost:true, canApprove:true, canClose:true },
-        pos:      { access:true, role:'admin', canVoid:true, canDiscount:true, maxDiscountPct:100, canRefund:true },
-        setup:    { access:true, role:'admin' }
-      };
-    })()
+    currentUserPerms: {
+      accounts: { access:true, role:'admin', canPost:true, canApprove:true, canClose:true },
+      pos:      { access:true, role:'admin', canVoid:true, canDiscount:true, maxDiscountPct:100, canRefund:true },
+      setup:    { access:true, role:'admin' }
+    }
   };
-  console.log('[YENU] Tenant adapter v2 loaded:', window._YENU.coName,
-              '| configured:', window._YENU.hasSetup,
-              '| posUsers:', window._YENU.posUsers.length,
-              '| stores:', window._YENU.posStores.length);
+  console.log('[YENU] v3 Tenant adapter:', window._YENU.coName,
+              '| products:', (posProducts||[]).length,
+              '| categories:', (posCategories||[]).length,
+              '| customers:', (posCustomers||[]).length);
 })();
 </script>
+
+
 
 
 
