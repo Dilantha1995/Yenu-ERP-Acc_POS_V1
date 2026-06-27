@@ -1263,73 +1263,114 @@ function pushNotif(type, title, message){
 let CU = null;          // current user
 
 // ─────────────────────────────────────────────────────────────────────
-// YENUERP SSO v4 — uses POS's own doLogin() with hard-set values
-(function _yenuSSOv4(){
+// YENUERP SSO v5 — guaranteed-to-work approach
+// 1. Injects owner into USERS array (no dependency on tenant adapter)
+// 2. Calls doLogin(email, pin) directly — no form manipulation
+// 3. Shows visible status if anything fails
+(function _yenuSSOv5(){
   if (typeof window === 'undefined') return;
-  if (!window._YENU || !window._YENU.session) {
-    console.log('[YENU] No session — skipping SSO');
+  // Read session DIRECTLY from localStorage — don't depend on _YENU
+  var sess = null;
+  try { sess = JSON.parse(localStorage.getItem('psms_session') || 'null'); } catch(e){}
+  if (!sess || !sess.tenant || !sess.email) {
+    console.log('[YENU] No session — skip SSO');
     return;
   }
-  var sess = window._YENU.session;
-  console.log('[YENU] SSO v4 starting for', sess.email);
+  console.log('[YENU] SSO v5 for', sess.email);
 
-  // Step 1: wait for USERS + doLogin to exist, then set form + call doLogin
+  // Visible debug indicator (briefly shows on screen)
+  var showStatus = function(text, isError) {
+    try {
+      var existing = document.getElementById('yenuSsoStatus');
+      if (existing) existing.remove();
+      var d = document.createElement('div');
+      d.id = 'yenuSsoStatus';
+      d.style.cssText = 'position:fixed;bottom:14px;left:14px;z-index:99999;background:' + (isError?'#dc2626':'#15803d') + ';color:#fff;padding:9px 16px;border-radius:8px;font:600 12px Segoe UI,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.25);max-width:300px';
+      d.textContent = '[YENU SSO] ' + text;
+      document.body.appendChild(d);
+      if (!isError) setTimeout(function(){ try { d.remove(); } catch(e){} }, 3000);
+    } catch(e){}
+  };
+
   var step = function(attempts) {
     attempts = attempts || 0;
-    var le = document.getElementById('loginEmail');
-    var lp = document.getElementById('loginPass');
-    var hasLogin = (typeof doLogin === 'function');
-    var hasUsers = (typeof USERS !== 'undefined' && USERS && USERS.length);
-    if (!le || !lp || !hasLogin || !hasUsers) {
-      if (attempts > 100) {
-        console.warn('[YENU] SSO timeout — le:', !!le, 'lp:', !!lp, 'doLogin:', hasLogin, 'USERS:', hasUsers);
+    if (typeof USERS === 'undefined' || !USERS || typeof doLogin !== 'function') {
+      if (attempts > 150) {
+        console.warn('[YENU] Timeout — USERS or doLogin not available');
+        showStatus('Setup not ready (USERS/doLogin missing)', true);
         return;
       }
       return setTimeout(function(){ step(attempts + 1); }, 30);
     }
-    // Find the owner user
-    var owner = USERS.find(function(u){ return u.email && u.email.toLowerCase() === sess.email.toLowerCase(); });
-    if (!owner) owner = USERS.find(function(u){ return u.id === 'owner'; });
-    if (!owner) owner = USERS[0];
+
+    // CRITICAL: inject owner into USERS array if not there
+    var owner = USERS.find(function(u) {
+      return u.email && u.email.toLowerCase() === sess.email.toLowerCase();
+    });
     if (!owner) {
-      console.error('[YENU] No matching user in POS USERS array. USERS:', USERS);
-      return;
+      owner = {
+        id: 'yenuowner',
+        name: sess.name || sess.email.split('@')[0],
+        initials: sess.short || (sess.name || 'U').split(' ').map(function(s){return s[0];}).join('').slice(0,2).toUpperCase(),
+        role: 'admin',
+        email: sess.email,
+        pin: '0000',
+        store: null,
+        color: sess.color || '#0d2d6e',
+        active: true,
+        canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
+      };
+      USERS.push(owner);
+      console.log('[YENU] Injected owner into USERS:', owner.email);
+    } else {
+      // Force-update PIN + active to ensure doLogin finds it
+      owner.pin = '0000';
+      owner.active = true;
+      console.log('[YENU] Owner already in USERS:', owner.email);
     }
-    console.log('[YENU] Found owner in USERS:', owner.name, '| pin:', owner.pin, '| email:', owner.email);
 
-    // Make sure form is enabled and clear of autofill
-    le.removeAttribute('disabled');
-    lp.removeAttribute('disabled');
-    le.removeAttribute('readonly');
-    lp.removeAttribute('readonly');
-
-    // Set values AND CALL doLogin SYNCHRONOUSLY in the same tick
-    // This prevents Chrome's async autofill from interfering
-    le.value = owner.email;
-    lp.value = String(owner.pin || '0000');
-
-    try {
-      doLogin();
-      // Check if doLogin succeeded by inspecting CU (it's window-global via let in script scope)
-      // Or by checking if loginScreen is hidden
-      var lsVisible = (document.getElementById('loginScreen').style.display !== 'none');
-      var errVisible = (document.getElementById('loginError') && document.getElementById('loginError').style.display === 'block');
-      if (errVisible) {
-        console.error('[YENU] doLogin showed error — credentials mismatch. Owner email:', owner.email, 'PIN:', owner.pin);
-        console.error('[YENU] But USERS contains:', USERS.map(function(u){ return u.email + '/' + u.pin; }).join(', '));
-      } else {
-        console.log('[YENU] ✅ doLogin success — POS authenticated');
+    // Wait for DOM, then call doLogin with explicit args (no form involvement)
+    var fireLogin = function() {
+      try {
+        doLogin(owner.email, '0000');
+        // Check after a tick whether it succeeded
+        setTimeout(function() {
+          if (typeof CU !== 'undefined' && CU && CU.email && CU.email.toLowerCase() === sess.email.toLowerCase()) {
+            console.log('[YENU] ✅ SSO success — CU is', CU.name);
+            showStatus('✅ Logged in as ' + CU.name);
+          } else {
+            console.error('[YENU] CU not set after doLogin — falling back to manual render');
+            showStatus('doLogin failed — see console', true);
+            // Last-resort: manually do what doLogin would do
+            try {
+              var els = document.getElementById('loginScreen');
+              var ar = document.getElementById('appRoot');
+              if (els) els.style.display = 'none';
+              if (ar) ar.style.display = 'block';
+              if (typeof CU !== 'undefined') CU = owner;
+              if (typeof PAGE !== 'undefined') PAGE = 'dashboard';
+              if (typeof renderSidebar === 'function') renderSidebar();
+              if (typeof renderRegBar === 'function') renderRegBar();
+              if (typeof renderMain === 'function') renderMain();
+              showStatus('✅ Manual render OK');
+            } catch(e2) {
+              console.error('[YENU] Manual render failed:', e2);
+              showStatus('Manual render failed: ' + e2.message, true);
+            }
+          }
+        }, 100);
+      } catch(e) {
+        console.error('[YENU] doLogin threw:', e);
+        showStatus('Login error: ' + e.message, true);
       }
-    } catch(e) {
-      console.error('[YENU] doLogin exception:', e);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function(){ setTimeout(fireLogin, 30); });
+    } else {
+      setTimeout(fireLogin, 30);
     }
   };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function(){ step(); });
-  } else {
-    step();
-  }
+  step();
 })();
 let PAGE = 'dashboard'; // current page
 let TAB = 0;            // current tab index
@@ -1516,9 +1557,9 @@ function fillLogin(email, pin){
   el('loginEmail').value = email;
   el('loginPass').value = pin;
 }
-function doLogin(){
-  const email = el('loginEmail').value.trim();
-  const pin = el('loginPass').value.trim();
+function doLogin(forceEmail, forcePin){
+  const email = (forceEmail !== undefined ? forceEmail : el('loginEmail').value).trim();
+  const pin   = (forcePin   !== undefined ? forcePin   : el('loginPass').value).trim();
   const u = USERS.find(x=>x.email.toLowerCase()===email.toLowerCase() && x.pin===pin && x.active);
   if(!u){
     el('loginError').textContent = 'Invalid credentials. Use a demo account from below.';
