@@ -227,49 +227,6 @@
               '| customers:', (posCustomers||[]).length);
 })();
 </script>
-<script>
-
-// ── YENUERP SSO v2: auto-login via POS's own doLogin() ──
-(function(){
-  if (typeof window === 'undefined' || !window._YENU || !window._YENU.session) return;
-  document.addEventListener('DOMContentLoaded', function(){
-    var tries = 0;
-    var maxTries = 50;
-    var iv = setInterval(function(){
-      tries++;
-      var loginEmailEl = document.getElementById('loginEmail');
-      var loginPassEl  = document.getElementById('loginPass');
-      var hasDoLogin   = (typeof doLogin === 'function');
-      if (!loginEmailEl || !loginPassEl || !hasDoLogin) {
-        if (tries > maxTries) {
-          clearInterval(iv);
-          console.warn('[YENU] SSO timeout — login form or doLogin not found');
-        }
-        return;
-      }
-      clearInterval(iv);
-      try {
-        var sess = window._YENU.session;
-        // Owner's PIN is set to '0000' by the tenant adapter
-        loginEmailEl.value = sess.email;
-        loginPassEl.value = '0000';
-        doLogin();
-        console.log('[YENU] SSO into POS as', sess.email);
-      } catch(e) {
-        console.error('[YENU] SSO failed:', e);
-      }
-    }, 50);
-  });
-})();
-
-</script>
-
-
-
-
-
-
-
 <script src="/erp-bridge.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1284,6 +1241,55 @@ function pushNotif(type, title, message){
 
 // ── CURRENT STATE ──
 let CU = null;          // current user
+
+// ─────────────────────────────────────────────────────────────────────
+// YENUERP SSO v3 — bypass login entirely (in-scope, no form/autocomplete games)
+// Runs synchronously while parsing this script, so it shares scope with CU.
+// ─────────────────────────────────────────────────────────────────────
+(function _yenuSSO(){
+  if (typeof window === 'undefined' || !window._YENU || !window._YENU.session) return;
+  if (typeof USERS === 'undefined' || !USERS) return;
+  var sess = window._YENU.session;
+  var owner = USERS.find(function(u){ return u.email && u.email.toLowerCase() === sess.email.toLowerCase(); });
+  if (!owner) owner = USERS.find(function(u){ return u.id === 'owner'; });
+  if (!owner) owner = USERS[0];
+  if (!owner) return;
+  // Set CU directly — we're in the same lexical scope as `let CU`
+  CU = owner;
+  console.log('[YENU] SSO: CU set to', owner.name, '(' + owner.email + ')');
+  // Apply UI changes when DOM is ready
+  var applyUi = function(){
+    try {
+      var ls = document.getElementById('loginScreen');
+      var ar = document.getElementById('appRoot');
+      if (ls) ls.style.display = 'none';
+      if (ar) ar.style.display = 'block';
+      var uav = document.getElementById('uav');
+      var unm = document.getElementById('unm');
+      if (uav) {
+        uav.textContent = owner.initials || (owner.name||'U')[0];
+        if (owner.color) uav.style.background = owner.color;
+      }
+      if (unm) unm.textContent = (owner.name||'User').split(' ')[0];
+      if (typeof PAGE !== 'undefined') PAGE = 'dashboard';
+      if (owner.role === 'cashier' && owner.store && typeof CURRENT_STORE !== 'undefined') {
+        CURRENT_STORE = owner.store;
+      }
+      ['renderSidebar','renderRegBar','renderMain'].forEach(function(fn){
+        try { if (typeof window[fn] === 'function') window[fn](); } catch(e){}
+      });
+      // Clear any stale login form values to prevent autocomplete confusion
+      var le = document.getElementById('loginEmail'); if (le) le.value = '';
+      var lp = document.getElementById('loginPass');  if (lp) lp.value = '';
+      console.log('[YENU] SSO UI applied — POS dashboard active');
+    } catch(e) { console.error('[YENU] SSO UI error:', e); }
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function(){ setTimeout(applyUi, 30); });
+  } else {
+    setTimeout(applyUi, 30);
+  }
+})();
 let PAGE = 'dashboard'; // current page
 let TAB = 0;            // current tab index
 let CURRENT_STORE = 'MAIN';   // active store filter
