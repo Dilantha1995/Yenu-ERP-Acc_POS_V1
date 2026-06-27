@@ -8371,5 +8371,72 @@ function yenuResetTestData() {
 }
 
 </script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     YENUERP POS FAILSAFE — runs LAST after all scripts are loaded
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function _yenuFailsafe(){
+  var enterPOS = function() {
+    var sess; try { sess = JSON.parse(localStorage.getItem('psms_session') || 'null'); } catch(e){}
+    if (!sess || !sess.email) return false;
+    if (typeof USERS !== 'undefined' && USERS) {
+      var owner = USERS.find(function(u){ return u.email && u.email.toLowerCase() === sess.email.toLowerCase(); });
+      if (!owner) {
+        owner = {
+          id: 'yenuowner', name: sess.name || sess.email,
+          initials: sess.short || (sess.name||'U').split(' ').map(function(s){return s[0];}).join('').slice(0,2).toUpperCase(),
+          role: 'admin', email: sess.email, pin: '0000', store: null,
+          color: sess.color || '#0d2d6e', active: true,
+          canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
+        };
+        USERS.push(owner);
+        console.log('[YENU FAILSAFE] Injected owner:', owner.email);
+      } else {
+        owner.pin = '0000'; owner.active = true;
+      }
+      if (typeof doLogin === 'function') {
+        try { doLogin(owner.email, '0000'); console.log('[YENU FAILSAFE] doLogin called'); return true; }
+        catch(e) { console.error('[YENU FAILSAFE] doLogin threw:', e); }
+      }
+    }
+    return false;
+  };
+
+  var showEnterButton = function() {
+    if (document.getElementById('yenuEnterBtn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'yenuEnterBtn';
+    btn.innerHTML = '\u{1F680} Click to Enter POS';
+    btn.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:linear-gradient(135deg,#1849a9,#0d2d6e);color:#fff;border:none;border-radius:14px;padding:22px 48px;font-family:Segoe UI,sans-serif;font-weight:800;font-size:18px;cursor:pointer;box-shadow:0 20px 60px rgba(13,45,110,.4)';
+    btn.onclick = function(){
+      btn.disabled = true; btn.textContent = 'Loading…';
+      if (enterPOS()) { setTimeout(function(){ try { btn.remove(); } catch(e){} }, 200); }
+      else { btn.textContent = 'Try again'; btn.disabled = false; }
+    };
+    document.body.appendChild(btn);
+  };
+
+  var run = function() {
+    setTimeout(function(){
+      enterPOS();
+      setTimeout(function(){
+        var sidebar = document.getElementById('sidebar');
+        var main = document.getElementById('main');
+        var hasSidebar = sidebar && sidebar.innerHTML.trim().length > 50;
+        var hasMain    = main    && main.innerHTML.trim().length > 50;
+        console.log('[YENU FAILSAFE] sidebar=' + (hasSidebar?'OK':'EMPTY') + ', main=' + (hasMain?'OK':'EMPTY'));
+        if (!hasSidebar && !hasMain) {
+          console.warn('[YENU FAILSAFE] empty — showing manual button');
+          showEnterButton();
+        }
+      }, 500);
+    }, 250);
+  };
+
+  if (document.readyState === 'complete') run();
+  else window.addEventListener('load', run);
+})();
+</script>
 </body>
 </html>
