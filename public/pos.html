@@ -1,6 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- ─────────────────────────────────────────────────────────────────────
+     YENUERP SSO GUARD — runs before anything else paints.
+     If YenuERP session exists, marks the doc so CSS can hide login screen.
+     ───────────────────────────────────────────────────────────────────── -->
+<script>
+(function(){
+  try {
+    var s = JSON.parse(localStorage.getItem('psms_session') || 'null');
+    if (s && s.tenant && s.email) {
+      document.documentElement.setAttribute('data-yenu-sso', '1');
+    }
+  } catch(e){}
+})();
+</script>
+<style id="yenu-sso-style">
+  html[data-yenu-sso] #loginScreen { display: none !important; }
+  html[data-yenu-sso] #appRoot { display: block !important; }
+  html[data-yenu-sso] body { background: #f4f6f9 !important; }
+</style>
+
 <!-- ═══════════════════════════════════════════════════════════════════
      YENUERP TENANT ADAPTER (v3)  — full master-data integration
      ═══════════════════════════════════════════════════════════════════ -->
@@ -1257,13 +1277,21 @@ let CU = null;          // current user
   // Set CU directly — we're in the same lexical scope as `let CU`
   CU = owner;
   console.log('[YENU] SSO: CU set to', owner.name, '(' + owner.email + ')');
-  // Apply UI changes when DOM is ready
+  // Apply UI changes when DOM is ready — retry until render funcs exist
+  var ssoApplied = false;
   var applyUi = function(){
+    if (ssoApplied) return;
     try {
       var ls = document.getElementById('loginScreen');
       var ar = document.getElementById('appRoot');
-      if (ls) ls.style.display = 'none';
-      if (ar) ar.style.display = 'block';
+      if (!ls || !ar) {
+        // DOM not ready, retry shortly
+        return setTimeout(applyUi, 50);
+      }
+      // Hide login, show app root (in addition to CSS guard)
+      ls.style.display = 'none';
+      ar.style.display = 'block';
+      // Set user avatar
       var uav = document.getElementById('uav');
       var unm = document.getElementById('unm');
       if (uav) {
@@ -1271,23 +1299,38 @@ let CU = null;          // current user
         if (owner.color) uav.style.background = owner.color;
       }
       if (unm) unm.textContent = (owner.name||'User').split(' ')[0];
+      // Set page state
       if (typeof PAGE !== 'undefined') PAGE = 'dashboard';
       if (owner.role === 'cashier' && owner.store && typeof CURRENT_STORE !== 'undefined') {
         CURRENT_STORE = owner.store;
       }
-      ['renderSidebar','renderRegBar','renderMain'].forEach(function(fn){
-        try { if (typeof window[fn] === 'function') window[fn](); } catch(e){}
-      });
-      // Clear any stale login form values to prevent autocomplete confusion
-      var le = document.getElementById('loginEmail'); if (le) le.value = '';
-      var lp = document.getElementById('loginPass');  if (lp) lp.value = '';
-      console.log('[YENU] SSO UI applied — POS dashboard active');
+      // Audit log
+      try { if (typeof logAudit === 'function') logAudit('login', '', 'SSO from YenuERP'); } catch(e){}
+      // Wipe form fields so autocomplete can't submit them
+      var le = document.getElementById('loginEmail'); if (le) { le.value = ''; le.setAttribute('disabled','disabled'); }
+      var lp = document.getElementById('loginPass');  if (lp) { lp.value = ''; lp.setAttribute('disabled','disabled'); }
+      // Try to render the dashboard — retry if functions aren't ready yet
+      var tryRender = function(attempts){
+        attempts = attempts || 0;
+        var ready = (typeof renderSidebar === 'function') && (typeof renderMain === 'function');
+        if (!ready) {
+          if (attempts < 40) return setTimeout(function(){ tryRender(attempts + 1); }, 50);
+          console.warn('[YENU] render functions never appeared');
+          return;
+        }
+        try { renderSidebar(); } catch(e){ console.warn('renderSidebar', e); }
+        try { if (typeof renderRegBar === 'function') renderRegBar(); } catch(e){}
+        try { renderMain(); } catch(e){ console.warn('renderMain', e); }
+        ssoApplied = true;
+        console.log('[YENU] ✅ POS dashboard rendered for', owner.name);
+      };
+      tryRender();
     } catch(e) { console.error('[YENU] SSO UI error:', e); }
   };
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function(){ setTimeout(applyUi, 30); });
+    document.addEventListener('DOMContentLoaded', applyUi);
   } else {
-    setTimeout(applyUi, 30);
+    applyUi();
   }
 })();
 let PAGE = 'dashboard'; // current page
