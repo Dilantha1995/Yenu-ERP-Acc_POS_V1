@@ -229,38 +229,36 @@
 </script>
 <script>
 
-// ── YENUERP SSO: auto-login when YenuERP session is active ──
+// ── YENUERP SSO v2: auto-login via POS's own doLogin() ──
 (function(){
   if (typeof window === 'undefined' || !window._YENU || !window._YENU.session) return;
   document.addEventListener('DOMContentLoaded', function(){
-    setTimeout(function(){
+    var tries = 0;
+    var maxTries = 50;
+    var iv = setInterval(function(){
+      tries++;
+      var loginEmailEl = document.getElementById('loginEmail');
+      var loginPassEl  = document.getElementById('loginPass');
+      var hasDoLogin   = (typeof doLogin === 'function');
+      if (!loginEmailEl || !loginPassEl || !hasDoLogin) {
+        if (tries > maxTries) {
+          clearInterval(iv);
+          console.warn('[YENU] SSO timeout — login form or doLogin not found');
+        }
+        return;
+      }
+      clearInterval(iv);
       try {
-        // Find the YenuERP user in POS USERS array
         var sess = window._YENU.session;
-        var u = (typeof USERS !== 'undefined') ? USERS.find(function(x){ return x.email === sess.email; }) : null;
-        if (!u && typeof USERS !== 'undefined') u = USERS.find(function(x){ return x.id === 'owner'; });
-        if (!u && typeof USERS !== 'undefined' && USERS.length) u = USERS[0];
-        if (!u) return;
-        // Skip login screen
-        var ls = document.getElementById('loginScreen');
-        var ar = document.getElementById('appRoot');
-        if (ls) ls.style.display = 'none';
-        if (ar) ar.style.display = 'block';
-        // Set current user
-        CU = u;
-        var uav = document.getElementById('uav');
-        var unm = document.getElementById('unm');
-        if (uav) { uav.textContent = u.initials; uav.style.background = u.color; }
-        if (unm) unm.textContent = u.name.split(' ')[0];
-        if (typeof PAGE !== 'undefined') PAGE = 'dashboard';
-        if (u.role === 'cashier' && u.store) CURRENT_STORE = u.store;
-        if (typeof logAudit === 'function') logAudit('login', '', 'SSO from YenuERP');
-        if (typeof renderSidebar === 'function') renderSidebar();
-        if (typeof renderRegBar === 'function') renderRegBar();
-        if (typeof renderMain === 'function') renderMain();
-        console.log('[YENU] Auto-logged into POS as', u.name);
-      } catch(e) { console.error('YENU SSO failed:', e); }
-    }, 100);
+        // Owner's PIN is set to '0000' by the tenant adapter
+        loginEmailEl.value = sess.email;
+        loginPassEl.value = '0000';
+        doLogin();
+        console.log('[YENU] SSO into POS as', sess.email);
+      } catch(e) {
+        console.error('[YENU] SSO failed:', e);
+      }
+    }, 50);
   });
 })();
 
