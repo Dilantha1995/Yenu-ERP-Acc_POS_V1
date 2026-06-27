@@ -78,10 +78,10 @@
     wrap.id = 'erpSwitcher';
     wrap.innerHTML =
       '<style>' +
-      '#erpSwitcher{position:fixed;top:8px;right:14px;z-index:9999;display:flex;align-items:center;gap:8px;font-family:"Segoe UI",system-ui,sans-serif;font-size:11.5px}' +
-      '#erpSwitcher .es-co{display:inline-flex;align-items:center;gap:7px;background:rgba(13,45,110,.95);color:#fff;border-radius:18px;padding:5px 12px;font-weight:700;box-shadow:0 4px 12px rgba(13,45,110,.18)}' +
+      '#erpSwitcher{position:fixed;top:10px;right:18px;z-index:9999;display:flex;align-items:center;gap:10px;font-family:"Segoe UI",system-ui,sans-serif;font-size:11.5px;max-width:calc(100vw - 40px);flex-wrap:nowrap;white-space:nowrap}' +
+      '#erpSwitcher .es-co{display:inline-flex;align-items:center;gap:7px;background:rgba(13,45,110,.95);color:#fff;border-radius:18px;padding:5px 12px;font-weight:700;box-shadow:0 4px 12px rgba(13,45,110,.18);max-width:200px;overflow:hidden;text-overflow:ellipsis}' +
       '#erpSwitcher .es-co .es-cobr{width:18px;height:18px;border-radius:5px;background:#fff;color:#0d2d6e;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900}' +
-      '#erpSwitcher .es-pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.96);border:1px solid rgba(13,45,110,.15);border-radius:18px;padding:4px 11px 4px 4px;cursor:pointer;box-shadow:0 4px 12px rgba(13,45,110,.12);color:#0d2d6e;font-weight:600}' +
+      '#erpSwitcher .es-pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.96);border:1px solid rgba(13,45,110,.15);border-radius:18px;padding:4px 11px 4px 4px;cursor:pointer;box-shadow:0 4px 12px rgba(13,45,110,.12);color:#0d2d6e;font-weight:600;max-width:180px;overflow:hidden}' +
       '#erpSwitcher .es-pill:hover{transform:translateY(-1px)}' +
       '#erpSwitcher .es-av{width:22px;height:22px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:800;display:flex;align-items:center;justify-content:center}' +
       '#erpSwitcher .es-mod{background:linear-gradient(135deg,#1849a9,#0d2d6e);color:#fff;border:none;border-radius:18px;padding:5px 12px;cursor:pointer;font-weight:700;font-family:inherit;font-size:11px;box-shadow:0 4px 12px rgba(13,45,110,.2)}' +

@@ -1263,74 +1263,72 @@ function pushNotif(type, title, message){
 let CU = null;          // current user
 
 // ─────────────────────────────────────────────────────────────────────
-// YENUERP SSO v3 — bypass login entirely (in-scope, no form/autocomplete games)
-// Runs synchronously while parsing this script, so it shares scope with CU.
-// ─────────────────────────────────────────────────────────────────────
-(function _yenuSSO(){
-  if (typeof window === 'undefined' || !window._YENU || !window._YENU.session) return;
-  if (typeof USERS === 'undefined' || !USERS) return;
+// YENUERP SSO v4 — uses POS's own doLogin() with hard-set values
+(function _yenuSSOv4(){
+  if (typeof window === 'undefined') return;
+  if (!window._YENU || !window._YENU.session) {
+    console.log('[YENU] No session — skipping SSO');
+    return;
+  }
   var sess = window._YENU.session;
-  var owner = USERS.find(function(u){ return u.email && u.email.toLowerCase() === sess.email.toLowerCase(); });
-  if (!owner) owner = USERS.find(function(u){ return u.id === 'owner'; });
-  if (!owner) owner = USERS[0];
-  if (!owner) return;
-  // Set CU directly — we're in the same lexical scope as `let CU`
-  CU = owner;
-  console.log('[YENU] SSO: CU set to', owner.name, '(' + owner.email + ')');
-  // Apply UI changes when DOM is ready — retry until render funcs exist
-  var ssoApplied = false;
-  var applyUi = function(){
-    if (ssoApplied) return;
+  console.log('[YENU] SSO v4 starting for', sess.email);
+
+  // Step 1: wait for USERS + doLogin to exist, then set form + call doLogin
+  var step = function(attempts) {
+    attempts = attempts || 0;
+    var le = document.getElementById('loginEmail');
+    var lp = document.getElementById('loginPass');
+    var hasLogin = (typeof doLogin === 'function');
+    var hasUsers = (typeof USERS !== 'undefined' && USERS && USERS.length);
+    if (!le || !lp || !hasLogin || !hasUsers) {
+      if (attempts > 100) {
+        console.warn('[YENU] SSO timeout — le:', !!le, 'lp:', !!lp, 'doLogin:', hasLogin, 'USERS:', hasUsers);
+        return;
+      }
+      return setTimeout(function(){ step(attempts + 1); }, 30);
+    }
+    // Find the owner user
+    var owner = USERS.find(function(u){ return u.email && u.email.toLowerCase() === sess.email.toLowerCase(); });
+    if (!owner) owner = USERS.find(function(u){ return u.id === 'owner'; });
+    if (!owner) owner = USERS[0];
+    if (!owner) {
+      console.error('[YENU] No matching user in POS USERS array. USERS:', USERS);
+      return;
+    }
+    console.log('[YENU] Found owner in USERS:', owner.name, '| pin:', owner.pin, '| email:', owner.email);
+
+    // Make sure form is enabled and clear of autofill
+    le.removeAttribute('disabled');
+    lp.removeAttribute('disabled');
+    le.removeAttribute('readonly');
+    lp.removeAttribute('readonly');
+
+    // Set values AND CALL doLogin SYNCHRONOUSLY in the same tick
+    // This prevents Chrome's async autofill from interfering
+    le.value = owner.email;
+    lp.value = String(owner.pin || '0000');
+
     try {
-      var ls = document.getElementById('loginScreen');
-      var ar = document.getElementById('appRoot');
-      if (!ls || !ar) {
-        // DOM not ready, retry shortly
-        return setTimeout(applyUi, 50);
+      doLogin();
+      // Check if doLogin succeeded by inspecting CU (it's window-global via let in script scope)
+      // Or by checking if loginScreen is hidden
+      var lsVisible = (document.getElementById('loginScreen').style.display !== 'none');
+      var errVisible = (document.getElementById('loginError') && document.getElementById('loginError').style.display === 'block');
+      if (errVisible) {
+        console.error('[YENU] doLogin showed error — credentials mismatch. Owner email:', owner.email, 'PIN:', owner.pin);
+        console.error('[YENU] But USERS contains:', USERS.map(function(u){ return u.email + '/' + u.pin; }).join(', '));
+      } else {
+        console.log('[YENU] ✅ doLogin success — POS authenticated');
       }
-      // Hide login, show app root (in addition to CSS guard)
-      ls.style.display = 'none';
-      ar.style.display = 'block';
-      // Set user avatar
-      var uav = document.getElementById('uav');
-      var unm = document.getElementById('unm');
-      if (uav) {
-        uav.textContent = owner.initials || (owner.name||'U')[0];
-        if (owner.color) uav.style.background = owner.color;
-      }
-      if (unm) unm.textContent = (owner.name||'User').split(' ')[0];
-      // Set page state
-      if (typeof PAGE !== 'undefined') PAGE = 'dashboard';
-      if (owner.role === 'cashier' && owner.store && typeof CURRENT_STORE !== 'undefined') {
-        CURRENT_STORE = owner.store;
-      }
-      // Audit log
-      try { if (typeof logAudit === 'function') logAudit('login', '', 'SSO from YenuERP'); } catch(e){}
-      // Wipe form fields so autocomplete can't submit them
-      var le = document.getElementById('loginEmail'); if (le) { le.value = ''; le.setAttribute('disabled','disabled'); }
-      var lp = document.getElementById('loginPass');  if (lp) { lp.value = ''; lp.setAttribute('disabled','disabled'); }
-      // Try to render the dashboard — retry if functions aren't ready yet
-      var tryRender = function(attempts){
-        attempts = attempts || 0;
-        var ready = (typeof renderSidebar === 'function') && (typeof renderMain === 'function');
-        if (!ready) {
-          if (attempts < 40) return setTimeout(function(){ tryRender(attempts + 1); }, 50);
-          console.warn('[YENU] render functions never appeared');
-          return;
-        }
-        try { renderSidebar(); } catch(e){ console.warn('renderSidebar', e); }
-        try { if (typeof renderRegBar === 'function') renderRegBar(); } catch(e){}
-        try { renderMain(); } catch(e){ console.warn('renderMain', e); }
-        ssoApplied = true;
-        console.log('[YENU] ✅ POS dashboard rendered for', owner.name);
-      };
-      tryRender();
-    } catch(e) { console.error('[YENU] SSO UI error:', e); }
+    } catch(e) {
+      console.error('[YENU] doLogin exception:', e);
+    }
   };
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applyUi);
+    document.addEventListener('DOMContentLoaded', function(){ step(); });
   } else {
-    applyUi();
+    step();
   }
 })();
 let PAGE = 'dashboard'; // current page
