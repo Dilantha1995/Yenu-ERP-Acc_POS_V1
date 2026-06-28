@@ -74,57 +74,113 @@
 
   function injectSwitcher () {
     const isExpired = trialExpired;
+    const showWarn = isExpired || (trialDaysLeft != null && trialDaysLeft <= 3);
+    const trialColor = isExpired ? '#dc2626' : (trialDaysLeft <= 3 ? '#d97706' : '#0891b2');
+
     const wrap = document.createElement('div');
     wrap.id = 'erpSwitcher';
     wrap.innerHTML =
       '<style>' +
-      '#erpSwitcher{position:fixed;top:10px;right:18px;z-index:9999;display:flex;align-items:center;gap:10px;font-family:"Segoe UI",system-ui,sans-serif;font-size:11.5px;max-width:calc(100vw - 40px);flex-wrap:nowrap;white-space:nowrap}' +
-      '#erpSwitcher .es-co{display:inline-flex;align-items:center;gap:7px;background:rgba(13,45,110,.95);color:#fff;border-radius:18px;padding:5px 12px;font-weight:700;box-shadow:0 4px 12px rgba(13,45,110,.18);max-width:200px;overflow:hidden;text-overflow:ellipsis}' +
-      '#erpSwitcher .es-co .es-cobr{width:18px;height:18px;border-radius:5px;background:#fff;color:#0d2d6e;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900}' +
-      '#erpSwitcher .es-pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.96);border:1px solid rgba(13,45,110,.15);border-radius:18px;padding:4px 11px 4px 4px;cursor:pointer;box-shadow:0 4px 12px rgba(13,45,110,.12);color:#0d2d6e;font-weight:600;max-width:180px;overflow:hidden}' +
-      '#erpSwitcher .es-pill:hover{transform:translateY(-1px)}' +
-      '#erpSwitcher .es-av{width:22px;height:22px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:800;display:flex;align-items:center;justify-content:center}' +
-      '#erpSwitcher .es-mod{background:linear-gradient(135deg,#1849a9,#0d2d6e);color:#fff;border:none;border-radius:18px;padding:5px 12px;cursor:pointer;font-weight:700;font-family:inherit;font-size:11px;box-shadow:0 4px 12px rgba(13,45,110,.2)}' +
-      '#erpSwitcher .es-mod:hover{transform:translateY(-1px)}' +
-      '#erpSwitcher .es-menu{position:absolute;top:36px;right:0;background:#fff;border:1px solid #dde1e8;border-radius:10px;box-shadow:0 12px 30px rgba(13,45,110,.18);padding:6px;min-width:200px;display:none}' +
+      '#erpSwitcher{position:fixed;top:11px;right:18px;z-index:9999;font-family:"Segoe UI",system-ui,sans-serif;font-size:12px}' +
+
+      // Single trigger pill — combines logo, company, user, arrow
+      '#erpSwitcher .es-trigger{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.97);border:1px solid rgba(255,255,255,.4);border-radius:22px;padding:4px 12px 4px 5px;cursor:pointer;box-shadow:0 6px 18px rgba(13,45,110,.22);color:#0d2d6e;font-weight:700;font-family:inherit;font-size:12px;transition:transform .15s,box-shadow .15s;position:relative}' +
+      '#erpSwitcher .es-trigger:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(13,45,110,.28)}' +
+      '#erpSwitcher .es-logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#1849a9,#0d2d6e);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:10.5px;letter-spacing:.02em;flex-shrink:0}' +
+      '#erpSwitcher .es-logo img{width:100%;height:100%;border-radius:7px;object-fit:cover}' +
+      '#erpSwitcher .es-coname{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}' +
+      '#erpSwitcher .es-sep{color:#cbd2e0;font-weight:400}' +
+      '#erpSwitcher .es-av{width:22px;height:22px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}' +
+      '#erpSwitcher .es-arr{color:#9ba3b5;font-size:10px;margin-left:2px}' +
+      '#erpSwitcher .es-warn-dot{position:absolute;top:-3px;right:-3px;width:11px;height:11px;border-radius:50%;background:' + trialColor + ';border:2px solid #fff;box-shadow:0 0 0 1px ' + trialColor + '}' +
+
+      // Responsive: hide company name on narrow screens
+      '@media (max-width: 900px){' +
+        '#erpSwitcher .es-coname,#erpSwitcher .es-sep{display:none}' +
+      '}' +
+
+      // Dropdown menu
+      '#erpSwitcher .es-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e2e6ee;border-radius:12px;box-shadow:0 18px 50px rgba(13,45,110,.22);min-width:260px;display:none;overflow:hidden;animation:esIn .12s ease-out}' +
+      '@keyframes esIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}' +
       '#erpSwitcher .es-menu.on{display:block}' +
-      '#erpSwitcher .es-mi{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:6px;cursor:pointer;color:#1c2030;font-weight:600;font-size:11.5px}' +
+      '#erpSwitcher .es-mhead{background:linear-gradient(135deg,#f8faff,#eef2fc);padding:14px 16px;border-bottom:1px solid #e2e6ee}' +
+      '#erpSwitcher .es-mco{font-weight:800;color:#0d2d6e;font-size:13px;margin-bottom:2px}' +
+      '#erpSwitcher .es-muser{display:flex;align-items:center;gap:8px;margin-top:6px}' +
+      '#erpSwitcher .es-muser .es-mav{width:28px;height:28px;border-radius:50%;color:#fff;font-size:10.5px;font-weight:800;display:flex;align-items:center;justify-content:center}' +
+      '#erpSwitcher .es-muser-info{line-height:1.3}' +
+      '#erpSwitcher .es-muser-name{font-weight:700;color:#1c2030;font-size:12px}' +
+      '#erpSwitcher .es-muser-role{font-size:10.5px;color:#5c6478;font-weight:500}' +
+      '#erpSwitcher .es-mtrial{margin-top:8px;font-size:10.5px;font-weight:700;padding:4px 9px;border-radius:11px;display:inline-block}' +
+      '#erpSwitcher .es-msection{padding:7px 8px;font-size:9.5px;font-weight:800;color:#9ba3b5;letter-spacing:.06em;text-transform:uppercase;padding-left:12px;padding-top:11px}' +
+      '#erpSwitcher .es-mi{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;color:#1c2030;font-weight:600;font-size:12px;transition:background .1s}' +
       '#erpSwitcher .es-mi:hover{background:#eef2fc;color:#1849a9}' +
       '#erpSwitcher .es-mi.cur{background:#eef2fc;color:#1849a9}' +
-      '#erpSwitcher .es-mi.sep{border-top:1px solid #dde1e8;margin-top:4px;padding-top:8px;color:#991b1b}' +
+      '#erpSwitcher .es-mi.cur::after{content:"●";color:#16a34a;margin-left:auto;font-size:10px}' +
+      '#erpSwitcher .es-mi.sep{border-top:1px solid #e2e6ee;color:#991b1b;margin-top:4px}' +
       '#erpSwitcher .es-mi.sep:hover{background:#fef2f2;color:#991b1b}' +
       '#erpSwitcher .es-ic{font-size:14px;width:18px;text-align:center}' +
-      '#erpSwitcher .es-trial{background:' + (isExpired?'#fef2f2':trialDaysLeft<=3?'#fffbeb':'#f0f9ff') + ';color:' + (isExpired?'#991b1b':trialDaysLeft<=3?'#92400e':'#0c4a6e') + ';border:1px solid ' + (isExpired?'#fecaca':trialDaysLeft<=3?'#fde68a':'#bae6fd') + ';border-radius:14px;padding:2px 9px;font-size:10px;font-weight:800;letter-spacing:.03em}' +
       '#erpExpiredBanner{position:fixed;top:0;left:0;right:0;background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:8px 18px;text-align:center;font-size:12px;font-weight:600;z-index:9998;font-family:"Segoe UI",system-ui,sans-serif}' +
       '#erpExpiredBanner a{color:#991b1b;font-weight:800;text-decoration:underline;margin-left:8px}' +
       '</style>' +
-      '<div class="es-co" title="Your company">' + (tenantLogo ? '<img src="' + tenantLogo + '" style="width:22px;height:22px;border-radius:5px;object-fit:cover;background:#fff">' : '<div class="es-cobr">' + (window._YENU && window._YENU.coCode ? window._YENU.coCode.slice(0,2) : 'Y') + '</div>') + '<span>' + esc(session.coName || tenant) + '</span></div>' +
-      '<button class="es-pill" onclick="document.getElementById(\'erpMenu\').classList.toggle(\'on\')">' +
+
+      // Single trigger pill
+      '<button class="es-trigger" onclick="event.stopPropagation();document.getElementById(\'erpMenu\').classList.toggle(\'on\')" title="' + esc(session.coName || tenant) + ' · ' + esc(session.name || '') + '">' +
+        '<span class="es-logo">' +
+          (tenantLogo ? '<img src="' + tenantLogo + '" alt="">' :
+            (window._YENU && window._YENU.coCode ? window._YENU.coCode.slice(0,2).toUpperCase() : 'Y')) +
+        '</span>' +
+        '<span class="es-coname">' + esc(session.coName || tenant) + '</span>' +
+        '<span class="es-sep">·</span>' +
         '<span class="es-av" style="background:' + (session.color||'#1849a9') + '">' + (session.short||'U') + '</span>' +
-        '<span>' + esc(session.name||'') + '</span>' +
-        '<span style="color:#9ba3b5">▾</span>' +
+        '<span class="es-arr">▾</span>' +
+        (showWarn ? '<span class="es-warn-dot"></span>' : '') +
       '</button>' +
-      '<button class="es-mod" onclick="location.href=\'/app\'">⊞ Modules</button>' +
-      (isPromo ? '<span class="es-trial" style="background:#dcfce7;color:#14532d;border-color:#86efac">🎁 ' + (session.promoLabel || 'PROMO') + '</span>' : '') +
-      (!isPromo && trialDaysLeft != null && !isExpired ? '<span class="es-trial">⏳ ' + trialDaysLeft + 'd trial</span>' : '') +
-      (isExpired ? '<span class="es-trial">⚠ TRIAL ENDED</span>' : '') +
       '<div class="es-menu" id="erpMenu"></div>';
+
     document.body.appendChild(wrap);
 
+    // Build menu contents
     const menu = document.getElementById('erpMenu');
     const mods = [
-      { id:'setup',    label:'⚙ Company Setup',  file:'setup.html' },
-      { id:'accounts', label:'📒 AccountsCore',  file:'accounts.html' },
-      { id:'pos',      label:'🛒 RetailFlow POS', file:'pos.html' }
+      { id:'setup',    label:'Company Setup',   ic:'⚙', file:'setup.html' },
+      { id:'accounts', label:'AccountsCore',    ic:'📒', file:'accounts.html' },
+      { id:'pos',      label:'RetailFlow POS',  ic:'🛒', file:'pos.html' }
     ];
-    menu.innerHTML = mods.filter(function(m){ return access.includes(m.id) || m.id === 'setup'; }).map(function(m){
-      return '<div class="es-mi ' + (m.id===MODULE?'cur':'') + '" onclick="location.href=\'/' + m.file + '\'">' +
-        '<span class="es-ic">' + m.label.split(' ')[0] + '</span>' + m.label.split(' ').slice(1).join(' ') +
-        (m.id===MODULE?' <span style="margin-left:auto;font-size:9px;color:#166534">●</span>':'') +
+
+    let badgeHtml = '';
+    if (isPromo) {
+      badgeHtml = '<div class="es-mtrial" style="background:#dcfce7;color:#14532d">🎁 ' + esc(session.promoLabel || 'PROMO') + '</div>';
+    } else if (isExpired) {
+      badgeHtml = '<div class="es-mtrial" style="background:#fef2f2;color:#991b1b">⚠ Trial ended</div>';
+    } else if (trialDaysLeft != null) {
+      const tColor = trialDaysLeft <= 3 ? '#fffbeb;color:#92400e' : '#f0f9ff;color:#0c4a6e';
+      badgeHtml = '<div class="es-mtrial" style="background:' + tColor + '">⏳ ' + trialDaysLeft + ' days left in trial</div>';
+    }
+
+    menu.innerHTML =
+      // Header section with company + user
+      '<div class="es-mhead">' +
+        '<div class="es-mco">' + esc(session.coName || tenant) + '</div>' +
+        '<div class="es-muser">' +
+          '<div class="es-mav" style="background:' + (session.color||'#1849a9') + '">' + (session.short||'U') + '</div>' +
+          '<div class="es-muser-info">' +
+            '<div class="es-muser-name">' + esc(session.name || '') + '</div>' +
+            '<div class="es-muser-role">' + esc(session.role || 'User') + ' · ' + esc(session.email || '') + '</div>' +
+          '</div>' +
+        '</div>' +
+        badgeHtml +
+      '</div>' +
+      // Modules section
+      '<div class="es-msection">Switch module</div>' +
+      mods.filter(function(m){ return access.includes(m.id) || m.id === 'setup'; }).map(function(m){
+        return '<div class="es-mi' + (m.id===MODULE?' cur':'') + '" onclick="location.href=\'/' + m.file + '\'">' +
+          '<span class="es-ic">' + m.ic + '</span>' + esc(m.label) +
         '</div>';
-    }).join('') +
-    '<div class="es-mi sep" onclick="if(confirm(\'Sign out of ' + esc(session.coName||'workspace') + '?\')){localStorage.removeItem(\'' + ME_KEY + '\');location.href=\'/\'}">' +
-      '<span class="es-ic">⎋</span>Sign out</div>';
+      }).join('') +
+      // Sign out
+      '<div class="es-mi sep" onclick="if(confirm(\'Sign out of ' + esc(session.coName||'workspace') + '?\')){localStorage.removeItem(\'' + ME_KEY + '\');location.href=\'/\'}">' +
+        '<span class="es-ic">⎋</span>Sign out' +
+      '</div>';
 
     document.addEventListener('click', function(e){
       if(!e.target.closest('#erpSwitcher')) menu.classList.remove('on');
