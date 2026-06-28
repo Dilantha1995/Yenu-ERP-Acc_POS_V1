@@ -2194,9 +2194,44 @@ function renderPOS(){
     const candidate = REGISTERS.find(r=>r.status==='open' && r.store===CURRENT_STORE);
     if(candidate){ reg = candidate; CURRENT_REGISTER = candidate; }
     else {
+      const closedRegs = REGISTERS.filter(r => r.store === CURRENT_STORE && r.status === 'closed');
+      const otherStoreRegs = REGISTERS.filter(r => r.store !== CURRENT_STORE);
+      const isAdmin = CU && (CU.role === 'admin' || CU.role === 'owner');
       return `
-        <div class="ph"><div><div class="pt">Point of Sale</div></div></div>
-        <div class="al al-w"><strong>No open register at ${getStoreName(CURRENT_STORE)}.</strong> Open a register or switch store.</div>
+        <div class="ph"><div><div class="pt">Point of Sale</div><div class="ps">Open a register to start selling</div></div></div>
+        <div class="al al-w" style="margin-bottom:16px"><strong>No open register at ${getStoreName(CURRENT_STORE)}.</strong> Pick a register below to open it.</div>
+        <div class="card">
+          <div class="ch"><div class="ct">📋 Available registers at ${getStoreName(CURRENT_STORE)}</div></div>
+          <div class="cb">
+            ${closedRegs.length === 0 ? `
+              <div class="empty">
+                <div class="empty-tt">No registers in this store</div>
+                <div class="empty-sb">Go to Settings → Registers to add one, or pick another store below</div>
+              </div>` : `
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+                ${closedRegs.map(r => `
+                  <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px">
+                    <div>
+                      <div style="font-weight:800;color:var(--blue3);font-size:13px">${esc(r.name)}</div>
+                      <div style="font-size:11px;color:var(--muted);margin-top:2px"><span class="mono">${esc(r.id)}</span> · ${esc(r.ccy||'LKR')}</div>
+                      ${isAdmin && r.assignedTo ? `<div style="font-size:10.5px;color:#9ba3b5;margin-top:3px">Assigned: ${esc(r.assignedTo)}</div>` : ''}
+                    </div>
+                    <button class="btn btn-g" style="width:100%" onclick="openRegisterModalFor('${esc(r.id)}')">▶ Open this register</button>
+                  </div>`).join('')}
+              </div>`}
+          </div>
+        </div>
+        ${otherStoreRegs.length > 0 ? `
+          <div class="card" style="margin-top:14px">
+            <div class="ch"><div class="ct">📦 Switch to another store</div></div>
+            <div class="cb">
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                ${[...new Set(otherStoreRegs.map(r => r.store))].map(s => `
+                  <button class="btn btn-sm" onclick="switchStore('${esc(s)}')">${esc(getStoreName(s))} (${otherStoreRegs.filter(r => r.store === s).length})</button>
+                `).join('')}
+              </div>
+            </div>
+          </div>` : ''}
       `;
     }
   }
@@ -2987,9 +3022,14 @@ function getDenoms(ccy){
 }
 
 function openRegisterModal(){
-  // Cashier path — find their own assigned register
-  const myReg = REGISTERS.find(r=>r.assignedTo===CU.id);
-  if(!myReg){ toast('No register assigned','error'); return; }
+  // Admin/Owner can open ANY closed register; cashier opens their assigned one
+  const isAdmin = CU && (CU.role === 'admin' || CU.role === 'owner');
+  let myReg = REGISTERS.find(r=>r.assignedTo===CU.id && r.status==='closed');
+  if(!myReg && isAdmin) {
+    myReg = REGISTERS.find(r=>r.store===CURRENT_STORE && r.status==='closed')
+         || REGISTERS.find(r=>r.status==='closed');
+  }
+  if(!myReg){ toast('No closed registers available — all are open or none exist','error'); return; }
   openRegisterModalFor(myReg.id);
 }
 function openRegisterModalFor(regId){
