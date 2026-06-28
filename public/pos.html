@@ -1263,115 +1263,7 @@ function pushNotif(type, title, message){
 let CU = null;          // current user
 
 // ─────────────────────────────────────────────────────────────────────
-// YENUERP SSO v5 — guaranteed-to-work approach
-// 1. Injects owner into USERS array (no dependency on tenant adapter)
-// 2. Calls doLogin(email, pin) directly — no form manipulation
-// 3. Shows visible status if anything fails
-(function _yenuSSOv5(){
-  if (typeof window === 'undefined') return;
-  // Read session DIRECTLY from localStorage — don't depend on _YENU
-  var sess = null;
-  try { sess = JSON.parse(localStorage.getItem('psms_session') || 'null'); } catch(e){}
-  if (!sess || !sess.tenant || !sess.email) {
-    console.log('[YENU] No session — skip SSO');
-    return;
-  }
-  console.log('[YENU] SSO v5 for', sess.email);
 
-  // Visible debug indicator (briefly shows on screen)
-  var showStatus = function(text, isError) {
-    try {
-      var existing = document.getElementById('yenuSsoStatus');
-      if (existing) existing.remove();
-      var d = document.createElement('div');
-      d.id = 'yenuSsoStatus';
-      d.style.cssText = 'position:fixed;bottom:14px;left:14px;z-index:99999;background:' + (isError?'#dc2626':'#15803d') + ';color:#fff;padding:9px 16px;border-radius:8px;font:600 12px Segoe UI,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.25);max-width:300px';
-      d.textContent = '[YENU SSO] ' + text;
-      document.body.appendChild(d);
-      if (!isError) setTimeout(function(){ try { d.remove(); } catch(e){} }, 3000);
-    } catch(e){}
-  };
-
-  var step = function(attempts) {
-    attempts = attempts || 0;
-    if (typeof USERS === 'undefined' || !USERS || typeof doLogin !== 'function') {
-      if (attempts > 150) {
-        console.warn('[YENU] Timeout — USERS or doLogin not available');
-        showStatus('Setup not ready (USERS/doLogin missing)', true);
-        return;
-      }
-      return setTimeout(function(){ step(attempts + 1); }, 30);
-    }
-
-    // CRITICAL: inject owner into USERS array if not there
-    var owner = USERS.find(function(u) {
-      return u.email && u.email.toLowerCase() === sess.email.toLowerCase();
-    });
-    if (!owner) {
-      owner = {
-        id: 'yenuowner',
-        name: sess.name || sess.email.split('@')[0],
-        initials: sess.short || (sess.name || 'U').split(' ').map(function(s){return s[0];}).join('').slice(0,2).toUpperCase(),
-        role: 'admin',
-        email: sess.email,
-        pin: '0000',
-        store: null,
-        color: sess.color || '#0d2d6e',
-        active: true,
-        canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
-      };
-      USERS.push(owner);
-      console.log('[YENU] Injected owner into USERS:', owner.email);
-    } else {
-      // Force-update PIN + active to ensure doLogin finds it
-      owner.pin = '0000';
-      owner.active = true;
-      console.log('[YENU] Owner already in USERS:', owner.email);
-    }
-
-    // Wait for DOM, then call doLogin with explicit args (no form involvement)
-    var fireLogin = function() {
-      try {
-        doLogin(owner.email, '0000');
-        // Check after a tick whether it succeeded
-        setTimeout(function() {
-          if (typeof CU !== 'undefined' && CU && CU.email && CU.email.toLowerCase() === sess.email.toLowerCase()) {
-            console.log('[YENU] ✅ SSO success — CU is', CU.name);
-            showStatus('✅ Logged in as ' + CU.name);
-          } else {
-            console.error('[YENU] CU not set after doLogin — falling back to manual render');
-            showStatus('doLogin failed — see console', true);
-            // Last-resort: manually do what doLogin would do
-            try {
-              var els = document.getElementById('loginScreen');
-              var ar = document.getElementById('appRoot');
-              if (els) els.style.display = 'none';
-              if (ar) ar.style.display = 'block';
-              if (typeof CU !== 'undefined') CU = owner;
-              if (typeof PAGE !== 'undefined') PAGE = 'dashboard';
-              if (typeof renderSidebar === 'function') renderSidebar();
-              if (typeof renderRegBar === 'function') renderRegBar();
-              if (typeof renderMain === 'function') renderMain();
-              showStatus('✅ Manual render OK');
-            } catch(e2) {
-              console.error('[YENU] Manual render failed:', e2);
-              showStatus('Manual render failed: ' + e2.message, true);
-            }
-          }
-        }, 100);
-      } catch(e) {
-        console.error('[YENU] doLogin threw:', e);
-        showStatus('Login error: ' + e.message, true);
-      }
-    };
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', function(){ setTimeout(fireLogin, 30); });
-    } else {
-      setTimeout(fireLogin, 30);
-    }
-  };
-  step();
-})();
 let PAGE = 'dashboard'; // current page
 let TAB = 0;            // current tab index
 let CURRENT_STORE = 'MAIN';   // active store filter
@@ -8370,72 +8262,51 @@ function yenuResetTestData() {
   location.reload();
 }
 
-</script>
 
-<!-- ═══════════════════════════════════════════════════════════════
-     YENUERP POS FAILSAFE — runs LAST after all scripts are loaded
-     ═══════════════════════════════════════════════════════════════ -->
-<script>
-(function _yenuFailsafe(){
-  var enterPOS = function() {
-    var sess; try { sess = JSON.parse(localStorage.getItem('psms_session') || 'null'); } catch(e){}
-    if (!sess || !sess.email) return false;
-    if (typeof USERS !== 'undefined' && USERS) {
-      var owner = USERS.find(function(u){ return u.email && u.email.toLowerCase() === sess.email.toLowerCase(); });
-      if (!owner) {
-        owner = {
-          id: 'yenuowner', name: sess.name || sess.email,
-          initials: sess.short || (sess.name||'U').split(' ').map(function(s){return s[0];}).join('').slice(0,2).toUpperCase(),
-          role: 'admin', email: sess.email, pin: '0000', store: null,
-          color: sess.color || '#0d2d6e', active: true,
-          canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
-        };
-        USERS.push(owner);
-        console.log('[YENU FAILSAFE] Injected owner:', owner.email);
-      } else {
-        owner.pin = '0000'; owner.active = true;
-      }
-      if (typeof doLogin === 'function') {
-        try { doLogin(owner.email, '0000'); console.log('[YENU FAILSAFE] doLogin called'); return true; }
-        catch(e) { console.error('[YENU FAILSAFE] doLogin threw:', e); }
-      }
+
+// ═══════════════════════════════════════════════════════════════
+// YENUERP SSO (simple) — same approach as AccountsCore:
+// Bridge already enforces login. Just set CU and render the dashboard.
+// ═══════════════════════════════════════════════════════════════
+(function _yenuPosBoot(){
+  try {
+    var s = JSON.parse(localStorage.getItem('psms_session') || 'null');
+    if (!s || !s.email) return;
+
+    // Find or create the owner user in USERS array
+    var owner = USERS.find(function(u){ return u.email && u.email.toLowerCase() === s.email.toLowerCase(); });
+    if (!owner) {
+      owner = {
+        id: 'yenuowner',
+        name: s.name || s.email,
+        initials: s.short || (s.name||'U').split(' ').map(function(x){return x[0];}).join('').slice(0,2).toUpperCase(),
+        role: 'admin',
+        email: s.email,
+        pin: '0000',
+        active: true,
+        color: s.color || '#0d2d6e',
+        canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true,
+        store: null
+      };
+      USERS.push(owner);
+      console.log('[YENU] Owner added to USERS:', owner.email);
     }
-    return false;
-  };
 
-  var showEnterButton = function() {
-    if (document.getElementById('yenuEnterBtn')) return;
-    var btn = document.createElement('button');
-    btn.id = 'yenuEnterBtn';
-    btn.innerHTML = '\u{1F680} Click to Enter POS';
-    btn.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:linear-gradient(135deg,#1849a9,#0d2d6e);color:#fff;border:none;border-radius:14px;padding:22px 48px;font-family:Segoe UI,sans-serif;font-weight:800;font-size:18px;cursor:pointer;box-shadow:0 20px 60px rgba(13,45,110,.4)';
-    btn.onclick = function(){
-      btn.disabled = true; btn.textContent = 'Loading…';
-      if (enterPOS()) { setTimeout(function(){ try { btn.remove(); } catch(e){} }, 200); }
-      else { btn.textContent = 'Try again'; btn.disabled = false; }
-    };
-    document.body.appendChild(btn);
-  };
-
-  var run = function() {
-    setTimeout(function(){
-      enterPOS();
-      setTimeout(function(){
-        var sidebar = document.getElementById('sidebar');
-        var main = document.getElementById('main');
-        var hasSidebar = sidebar && sidebar.innerHTML.trim().length > 50;
-        var hasMain    = main    && main.innerHTML.trim().length > 50;
-        console.log('[YENU FAILSAFE] sidebar=' + (hasSidebar?'OK':'EMPTY') + ', main=' + (hasMain?'OK':'EMPTY'));
-        if (!hasSidebar && !hasMain) {
-          console.warn('[YENU FAILSAFE] empty — showing manual button');
-          showEnterButton();
-        }
-      }, 500);
-    }, 250);
-  };
-
-  if (document.readyState === 'complete') run();
-  else window.addEventListener('load', run);
+    // Boot the dashboard exactly like doLogin would, but without form
+    CU = owner;
+    el('loginScreen').style.display = 'none';
+    el('appRoot').style.display = 'block';
+    var uav = el('uav'); if (uav) { uav.textContent = owner.initials; uav.style.background = owner.color; }
+    var unm = el('unm'); if (unm) unm.textContent = owner.name.split(' ')[0];
+    PAGE = 'dashboard';
+    if (typeof logAudit === 'function') logAudit('login', '', 'SSO from YenuERP');
+    renderSidebar();
+    renderRegBar();
+    renderMain();
+    console.log('[YENU] POS dashboard ready for', owner.name);
+  } catch(e) {
+    console.error('[YENU] POS boot error:', e);
+  }
 })();
 </script>
 </body>
