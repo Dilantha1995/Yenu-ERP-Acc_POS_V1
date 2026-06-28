@@ -22,6 +22,7 @@
   const users      = _yget(PREFIX + 'users') || [];
   const posSet     = _yget(PREFIX + 'pos-settings') || {};
   const accSet     = _yget(PREFIX + 'accounts-settings') || {};
+  const currencies = _yget(PREFIX + 'currencies') || [];
 
   const typeMap = { ast:'ASSET', lia:'LIABILITY', eq:'EQUITY', rev:'REVENUE', exp:'EXPENSE' };
   const pad = (n,w) => String(n).padStart(w,'0');
@@ -41,6 +42,14 @@
     }
     if (!u.pin) u.pin = '1234';
     if (u.active === undefined) u.active = true;
+    if (!u.code) {
+      const first = (u.firstName || u.name || '').trim();
+      const last = (u.lastName || '').trim();
+      if (first && last) u.code = (first[0] + last[0]).toUpperCase();
+      else if (first) u.code = first.slice(0,2).toUpperCase();
+      else u.code = 'XX';
+    }
+    u.code = u.code.toUpperCase();
     return u;
   }
   const normUsers = users.map(_norm);
@@ -70,6 +79,8 @@
       taxRate: it.taxRate || (tax && tax.gstRate) || 0,
       unit: it.uom || 'pcs',
       img: it.icon || '📦',
+      img1: it.img1 || null,
+      img2: it.img2 || null,
       track: true,
       lowStock: it.lowStock || 5,
       active: it.active !== false,
@@ -183,6 +194,7 @@
       arr.push({
         id: 'owner', name: sess.name,
         initials: sess.short || (sess.name||'U').split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
+        code: (sess.short || (sess.name||'U').split(' ').map(s=>s[0]).join('').slice(0,2)).toUpperCase(),
         role: 'admin', email: sess.email, pin: '0000',
         store: null, color: sess.color || '#0d2d6e', active: true,
         canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
@@ -193,7 +205,7 @@
           id: (u.email || 'u'+i).split('@')[0],
           name: u.name,
           initials: u.short || u.name.split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
-          role: p.role || 'cashier', email: u.email, pin: u.pin || '1234',
+          role: p.role || 'cashier', email: u.email, pin: u.pin || '1234', code: u.code,
           store: p.defaultStore || 'MAIN', color: u.color || '#1849a9',
           active: u.active !== false,
           canVoid: p.canVoid || false, canDiscount: p.canDiscount !== false,
@@ -214,6 +226,7 @@
 
     accountsSettings: accSet,
     tax: tax, branding: branding,
+    currencies: currencies,
 
     currentUserPerms: {
       accounts: { access:true, role:'admin', canPost:true, canApprove:true, canClose:true },

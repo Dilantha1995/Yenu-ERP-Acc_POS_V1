@@ -42,6 +42,7 @@
   const users      = _yget(PREFIX + 'users') || [];
   const posSet     = _yget(PREFIX + 'pos-settings') || {};
   const accSet     = _yget(PREFIX + 'accounts-settings') || {};
+  const currencies = _yget(PREFIX + 'currencies') || [];
 
   const typeMap = { ast:'ASSET', lia:'LIABILITY', eq:'EQUITY', rev:'REVENUE', exp:'EXPENSE' };
   const pad = (n,w) => String(n).padStart(w,'0');
@@ -61,6 +62,14 @@
     }
     if (!u.pin) u.pin = '1234';
     if (u.active === undefined) u.active = true;
+    if (!u.code) {
+      const first = (u.firstName || u.name || '').trim();
+      const last = (u.lastName || '').trim();
+      if (first && last) u.code = (first[0] + last[0]).toUpperCase();
+      else if (first) u.code = first.slice(0,2).toUpperCase();
+      else u.code = 'XX';
+    }
+    u.code = u.code.toUpperCase();
     return u;
   }
   const normUsers = users.map(_norm);
@@ -90,6 +99,8 @@
       taxRate: it.taxRate || (tax && tax.gstRate) || 0,
       unit: it.uom || 'pcs',
       img: it.icon || '📦',
+      img1: it.img1 || null,
+      img2: it.img2 || null,
       track: true,
       lowStock: it.lowStock || 5,
       active: it.active !== false,
@@ -203,6 +214,7 @@
       arr.push({
         id: 'owner', name: sess.name,
         initials: sess.short || (sess.name||'U').split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
+        code: (sess.short || (sess.name||'U').split(' ').map(s=>s[0]).join('').slice(0,2)).toUpperCase(),
         role: 'admin', email: sess.email, pin: '0000',
         store: null, color: sess.color || '#0d2d6e', active: true,
         canVoid: true, canDiscount: true, maxDiscountPct: 100, canRefund: true
@@ -213,7 +225,7 @@
           id: (u.email || 'u'+i).split('@')[0],
           name: u.name,
           initials: u.short || u.name.split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase(),
-          role: p.role || 'cashier', email: u.email, pin: u.pin || '1234',
+          role: p.role || 'cashier', email: u.email, pin: u.pin || '1234', code: u.code,
           store: p.defaultStore || 'MAIN', color: u.color || '#1849a9',
           active: u.active !== false,
           canVoid: p.canVoid || false, canDiscount: p.canDiscount !== false,
@@ -234,6 +246,7 @@
 
     accountsSettings: accSet,
     tax: tax, branding: branding,
+    currencies: currencies,
 
     currentUserPerms: {
       accounts: { access:true, role:'admin', canPost:true, canApprove:true, canClose:true },
@@ -1538,6 +1551,10 @@ function nav(p){
 // ═══════════════════════════════════════════════════════════════
 //  REGISTER STATUS BAR (for cashiers)
 // ═══════════════════════════════════════════════════════════════
+function regDisplayName(reg) {
+  if (reg && reg.workingName) return reg.workingName + ' · ' + reg.name;
+  return reg ? reg.name : '';
+}
 function renderRegBar(){
   if(!CU){ el('regBar').innerHTML=''; return; }
   // Cashier and manager can both operate registers
@@ -3053,6 +3070,20 @@ function openRegisterConfirm(regId){
   myReg.openingFloat = float;
   myReg.openingBreakdown = breakdown;
   myReg.openedBy = CU.id;
+  // YENU: Auto-generate working register name LB-2026-01-26-DC-001
+  try {
+    const today = new Date();
+    const dateStr = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    const coCode = (window._YENU && window._YENU.coCode) ? window._YENU.coCode : 'CO';
+    const cashCode = (CU.code) ? CU.code : (CU.initials || (CU.name||'XX').slice(0,2)).toUpperCase();
+    const serialKey = 'yenu_reg_serial_' + dateStr;
+    let serial = parseInt(localStorage.getItem(serialKey) || '0', 10) + 1;
+    localStorage.setItem(serialKey, String(serial));
+    const workingName = coCode + '-' + dateStr + '-' + cashCode + '-' + String(serial).padStart(3,'0');
+    myReg.workingName = workingName;
+    myReg.workingDate = dateStr;
+    console.log('[YENU] Register opened with working name:', workingName);
+  } catch(e) { console.warn('Register naming failed:', e); }
   // Create session
   SESSIONS.push({
     id: uid(), regId: myReg.id, store: myReg.store, cashier: CU.id,

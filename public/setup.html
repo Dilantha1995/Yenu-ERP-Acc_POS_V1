@@ -269,6 +269,7 @@ const NAV = [
   ]},
   { sec: 'Master Data', items: [
     { key: 'coa',       label: 'Chart of Accounts',ic: '📒' },
+    { key: 'currency',  label: 'Currencies',         ic: '💱' },
     { key: 'categories',label: 'Product Categories',ic: '🏷️' },
     { key: 'items',     label: 'Products / Items', ic: '📦' },
     { key: 'labels',    label: 'Print Labels',     ic: '🖨️' },
@@ -617,6 +618,158 @@ function ensureDefaults() {
   }
   if (!tstore.get('categories')) tstore.set('categories', []);
   if (!tstore.get('skuCounters')) tstore.set('skuCounters', {});
+  if (!tstore.get('currencies')) {
+    const co = tstore.get('company') || {};
+    const base = co.currency || 'LKR';
+    const baseInfo = {
+      LKR: { name:'Sri Lankan Rupee', symbol:'Rs.' },
+      MVR: { name:'Maldivian Rufiyaa', symbol:'Rf' },
+      USD: { name:'US Dollar', symbol:'$' },
+      EUR: { name:'Euro', symbol:'€' },
+      INR: { name:'Indian Rupee', symbol:'₹' },
+      GBP: { name:'British Pound', symbol:'£' },
+      AED: { name:'UAE Dirham', symbol:'د.إ' },
+      SGD: { name:'Singapore Dollar', symbol:'S$' },
+      THB: { name:'Thai Baht', symbol:'฿' }
+    };
+    tstore.set('currencies', [{ code: base, name: baseInfo[base]?.name || base, symbol: baseInfo[base]?.symbol || base, rate: 1, isBase: true, active: true }]);
+  }
+}
+
+/* ── CURRENCY MANAGEMENT VIEW ── */
+function view_currency() {
+  const ccys = tstore.get('currencies') || [];
+  const co = tstore.get('company') || {};
+  const baseCode = (ccys.find(c => c.isBase) || ccys[0] || { code: co.currency || 'LKR' }).code;
+  document.getElementById('main').innerHTML = `
+    <div class="ph">
+      <div><div class="pt">💱 Currencies</div><div class="ps">Manage currencies and exchange rates · Base: <span style="font-weight:800;color:var(--blue)">${esc(baseCode)}</span></div></div>
+      <div class="brow"><button class="btn btn-p" onclick="editCurrency()">＋ Add currency</button></div>
+    </div>
+    ${ccys.length === 0 ? `
+      <div class="card"><div class="cb"><div class="empty">
+        <div class="empty-ic">💱</div>
+        <div class="empty-tt">No currencies configured</div>
+        <div class="empty-sb">Add at least one base currency (typically LKR for Sri Lanka)</div>
+        <button class="btn btn-p" onclick="editCurrency()">＋ Add currency</button>
+      </div></div></div>
+    ` : `
+      <div class="card">
+        <div class="ch"><div class="ct">Configured currencies</div><div class="cs">Exchange rates are vs the base currency</div></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Code</th><th>Name</th><th>Symbol</th><th class="num">Rate</th><th>Type</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              ${ccys.map(c => `<tr>
+                <td><span class="mono" style="font-weight:800;color:var(--blue)">${esc(c.code)}</span></td>
+                <td><b>${esc(c.name)}</b></td>
+                <td style="font-family:Consolas;font-size:13px">${esc(c.symbol)}</td>
+                <td class="num">${c.isBase ? '1.0000 (base)' : (c.rate || 0).toFixed(4)}</td>
+                <td>${c.isBase ? '<span style="background:#dcfce7;color:#14532d;padding:3px 9px;border-radius:11px;font-size:10.5px;font-weight:800">BASE</span>' : '<span style="background:#eef2fc;color:#1849a9;padding:3px 9px;border-radius:11px;font-size:10.5px;font-weight:800">Foreign</span>'}</td>
+                <td>${c.active !== false ? '<span style="color:var(--green);font-weight:700">● Active</span>' : '<span style="color:#9ba3b5">○ Disabled</span>'}</td>
+                <td class="row-actions">
+                  <button class="btn btn-xs" onclick='editCurrency(${JSON.stringify(c)})'>Edit</button>
+                  ${c.isBase ? '' : `<button class="btn btn-xs" onclick='deleteCurrency("${esc(c.code)}")' style="color:var(--red)">×</button>`}
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ch"><div class="ct">Quick rate updates</div><div class="cs">Update foreign currency rates against ${esc(baseCode)}</div></div>
+        <div class="cb" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+          ${ccys.filter(c => !c.isBase).map(c => `
+            <div style="background:#fff;border:1px solid var(--border);border-radius:9px;padding:11px 13px">
+              <div style="font-size:11px;color:var(--muted);font-weight:700">${esc(c.code)} — ${esc(c.name)}</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:7px">
+                <span style="font-size:10.5px;color:var(--muted)">1 ${esc(c.code)} =</span>
+                <input class="fi" type="number" step="0.0001" value="${c.rate || 0}" style="padding:5px 8px;font-family:Consolas;text-align:right" onchange="updateRate('${esc(c.code)}', this.value)">
+                <span style="font-size:10.5px;color:var(--muted)">${esc(baseCode)}</span>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+    `}
+  `;
+}
+
+function editCurrency(c) {
+  const isNew = !c;
+  const ccys = tstore.get('currencies') || [];
+  const co = tstore.get('company') || {};
+  const hasBase = ccys.some(x => x.isBase);
+  c = c || { code:'', name:'', symbol:'', rate:0, isBase: !hasBase, active:true };
+  showModal(`
+    <div class="m-head"><div><div class="m-tt">${isNew?'New':'Edit'} Currency</div></div><button class="m-close" onclick="closeModal()">×</button></div>
+    <div class="m-body">
+      <form id="ccyForm" onsubmit="event.preventDefault();saveCurrency(${isNew},'${esc(c.code)}')">
+        <div class="fg2">
+          <div class="fg"><label class="fl">Currency code <span class="req">*</span></label>
+            <input class="fi" name="code" value="${esc(c.code)}" required maxlength="3" pattern="[A-Z]{3}" style="font-family:Consolas;text-transform:uppercase;letter-spacing:.06em;font-weight:700" ${isNew?'':'readonly'}>
+            <div class="fhelp">3-letter ISO code (LKR, USD, EUR)</div></div>
+          <div class="fg"><label class="fl">Name <span class="req">*</span></label><input class="fi" name="name" value="${esc(c.name)}" required></div>
+        </div>
+        <div class="fg2">
+          <div class="fg"><label class="fl">Symbol</label><input class="fi" name="symbol" value="${esc(c.symbol)}" placeholder="Rs., $, €..." style="font-family:Consolas;font-size:14px"></div>
+          <div class="fg"><label class="fl">Exchange rate vs base</label>
+            <input class="fi" type="number" name="rate" value="${c.rate || 0}" step="0.0001" min="0" ${c.isBase ? 'disabled' : ''}>
+            <div class="fhelp">${c.isBase ? 'Base currency rate is always 1' : 'How many units of base = 1 of this currency'}</div></div>
+        </div>
+        <div class="fg">
+          <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:12.5px">
+            <input type="checkbox" name="isBase" ${c.isBase?'checked':''} ${hasBase && !c.isBase ? 'disabled' : ''} style="accent-color:var(--blue)"> Set as base currency
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:12.5px;margin-top:6px">
+            <input type="checkbox" name="active" ${c.active !== false?'checked':''} style="accent-color:var(--blue)"> Active (available for use)
+          </label>
+        </div>
+      </form>
+    </div>
+    <div class="m-foot">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-p" onclick="document.getElementById('ccyForm').requestSubmit()">${isNew?'Add':'Save'}</button>
+    </div>
+  `);
+}
+
+function saveCurrency(isNew, oldCode) {
+  const f = document.getElementById('ccyForm');
+  const data = { code:'', name:'', symbol:'', rate:0, isBase:false, active:true };
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'checkbox') data[el.name] = el.checked;
+    else if (el.name === 'rate') data[el.name] = parseFloat(el.value) || 0;
+    else data[el.name] = el.value;
+  }
+  data.code = data.code.toUpperCase();
+  if (data.isBase) data.rate = 1;
+  if (!data.rate && !data.isBase) { toast('Enter an exchange rate', true); return; }
+  let ccys = tstore.get('currencies') || [];
+  if (data.isBase) ccys.forEach(x => { if (x.code !== data.code) x.isBase = false; });
+  if (isNew) {
+    if (ccys.find(x => x.code === data.code)) { toast('Code already used', true); return; }
+    ccys.push(data);
+  } else {
+    const idx = ccys.findIndex(x => x.code === oldCode);
+    if (idx >= 0) ccys[idx] = data;
+  }
+  tstore.set('currencies', ccys);
+  closeModal(); toast('Currency saved ✓');
+  view_currency();
+}
+
+function deleteCurrency(code) {
+  if (!confirm('Delete this currency? Existing transactions in this currency stay unchanged.')) return;
+  tstore.set('currencies', (tstore.get('currencies') || []).filter(c => c.code !== code));
+  toast('Currency deleted'); view_currency();
+}
+
+function updateRate(code, val) {
+  const ccys = tstore.get('currencies') || [];
+  const c = ccys.find(x => x.code === code);
+  if (c) { c.rate = parseFloat(val) || 0; tstore.set('currencies', ccys); toast(`${code} rate updated`); }
 }
 
 /* ── CATEGORIES VIEW ── */
@@ -1381,6 +1534,32 @@ function _bumpSkuCounter(catCode) {
   counters[catCode] = (counters[catCode] || 0) + 1;
   tstore.set('skuCounters', counters);
 }
+function loadProductImage(input, slot) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast('Image too large (max 5MB)', true); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    // Compress to ~200KB max via canvas
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height;
+      const max = 600;
+      if (w > max || h > max) {
+        if (w > h) { h = h * max / w; w = max; }
+        else { w = w * max / h; h = max; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const data = canvas.toDataURL('image/jpeg', 0.7);
+      document.getElementById('itemImg' + slot).value = data;
+      document.getElementById('imgPrev' + slot).innerHTML = '<img src="' + data + '" style="max-width:100%;max-height:100%;object-fit:contain">';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
 function autoFillSku() {
   const catSelect = document.getElementById('itemCat');
   const catCode = catSelect ? catSelect.value : '';
@@ -1425,6 +1604,22 @@ function editItem(item) {
         <div class="fg2">
           <div class="fg"><label class="fl">Barcode</label><input class="fi" name="barcode" value="${esc(item.barcode)}" placeholder="optional"></div>
           <div class="fg"><label class="fl">Unit of measure</label><select class="fs" name="uom">${['pcs','box','kg','g','L','ml','m','sq.ft','hour','day'].map(v=>`<option ${item.uom===v?'selected':''}>${v}</option>`).join('')}</select></div>
+        </div>
+        <div class="fg" style="background:var(--bg);padding:11px 13px;border-radius:8px">
+          <label class="fl">Product images (optional — 2 photos)</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+            <div>
+              <div id="imgPrev1" style="width:100%;height:90px;background:#fff;border:1px dashed #cbd2e0;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#9ba3b5;font-size:11px;overflow:hidden">${item.img1 ? `<img src="${item.img1}" style="max-width:100%;max-height:100%;object-fit:contain">` : 'No image 1'}</div>
+              <input type="file" accept="image/*" onchange="loadProductImage(this, 1)" style="width:100%;font-size:10.5px;margin-top:5px">
+              <input type="hidden" name="img1" id="itemImg1" value="${esc(item.img1||'')}">
+            </div>
+            <div>
+              <div id="imgPrev2" style="width:100%;height:90px;background:#fff;border:1px dashed #cbd2e0;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#9ba3b5;font-size:11px;overflow:hidden">${item.img2 ? `<img src="${item.img2}" style="max-width:100%;max-height:100%;object-fit:contain">` : 'No image 2'}</div>
+              <input type="file" accept="image/*" onchange="loadProductImage(this, 2)" style="width:100%;font-size:10.5px;margin-top:5px">
+              <input type="hidden" name="img2" id="itemImg2" value="${esc(item.img2||'')}">
+            </div>
+          </div>
+          <div class="fhelp" style="margin-top:6px">Images auto-compress to ~200KB. Optional but recommended for POS catalog.</div>
         </div>
         <div class="fg3">
           <div class="fg"><label class="fl">Cost</label><input class="fi" type="number" step="0.01" name="cost" value="${item.cost||0}"></div>
@@ -1985,13 +2180,19 @@ function _renderEditUser(isNew, u) {
       <div class="fg3">
         <div class="fg"><label class="fl">Initials</label>
           <input class="fi" id="uf_short" value="${esc(u.short)}" maxlength="3" style="font-family:Consolas;text-align:center;font-weight:700"></div>
+        <div class="fg"><label class="fl">User code <span class="req">*</span></label>
+          <input class="fi" id="uf_code" value="${esc(u.code||'')}" maxlength="3" placeholder="e.g. DC" required style="font-family:Consolas;text-transform:uppercase;text-align:center;font-weight:700;letter-spacing:.08em">
+          <div class="fhelp">Used in register names (LB-2026-01-26-<b>DC</b>-001)</div></div>
         <div class="fg"><label class="fl">PIN (4 digits) <span class="req">*</span></label>
           <input class="fi" id="uf_pin" value="${esc(u.pin||'1234')}" pattern="[0-9]{4}" maxlength="4" required style="font-family:Consolas;letter-spacing:.3em;text-align:center">
           <div class="fhelp">Used for quick login in POS</div></div>
+      </div>
+      <div class="fg2">
         <div class="fg"><label class="fl">Avatar color</label>
           <div style="display:flex;gap:6px;align-items:center"><input type="color" id="uf_color" value="${u.color}" style="width:46px;height:36px;border:1px solid var(--border);border-radius:7px;cursor:pointer">
           <input class="fi" id="uf_colorText" value="${u.color}" style="font-family:Consolas" oninput="document.getElementById('uf_color').value=this.value"></div>
         </div>
+        <div class="fg"></div>
       </div>
       <div class="fg">
         <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13px">
@@ -2161,6 +2362,11 @@ function _captureEditUserInputs(u) {
     u.name = get('uf_name').value.trim();
     u.email = get('uf_email').value.trim().toLowerCase();
     u.short = get('uf_short').value.trim().toUpperCase();
+    u.code = get('uf_code') ? get('uf_code').value.trim().toUpperCase() : u.code;
+    if (!u.code) {
+      const parts = u.name.split(/\s+/);
+      u.code = parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : (parts[0]||'XX').slice(0,2).toUpperCase();
+    }
     u.pin = get('uf_pin').value;
     u.color = get('uf_color').value;
     u.active = get('uf_active').checked;
@@ -2277,7 +2483,7 @@ function view_pos_settings() {
       <div class="ch"><div class="ct">Stores / Locations</div><div class="cs">Each store can have its own registers and inventory</div></div>
       <div class="cb">
         <div class="tw"><table id="storesTable">
-          <thead><tr><th>Code</th><th>Store name</th><th>Address</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Code <span style="font-weight:400;color:#9ba3b5;font-size:10px">(e.g. MAIN, COL)</span></th><th>Store name</th><th>Address</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${stores.map((st,i)=>`
               <tr data-store="${i}">
