@@ -911,6 +911,11 @@ function generateInvoiceNo(storeCode){
 
 // Seed sales history
 function seedSales(){
+  // YenuERP: Skip demo sales for configured tenants — they should start clean
+  if (window._YENU && window._YENU.hasSetup) {
+    console.log('[YENU] Skipping demo sales seed (tenant configured)');
+    return;
+  }
   const sampleSales = [
     // Today's sales
     { store:'MAIN', regId:'R001', cashier:'fathih', dayOffset:0, customer:'C001', items:[
